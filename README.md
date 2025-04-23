@@ -18,6 +18,7 @@ Open up your OS Terminal and PIP Install the following libraries:
 pip install discord
 pip install requests
 pip install dotenv
+pip install python-dotenv
 ```
 
 (TODO: Add these into a python environment)
