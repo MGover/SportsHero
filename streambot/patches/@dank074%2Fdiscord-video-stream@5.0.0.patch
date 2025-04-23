@@ -1,0 +1,19 @@
+diff --git a/node_modules/@dank074/discord-video-stream/.bun-tag-42e7ed6e2ec56467 b/.bun-tag-42e7ed6e2ec56467
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/node_modules/@dank074/discord-video-stream/.bun-tag-bf9a727e1b5998b8 b/.bun-tag-bf9a727e1b5998b8
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/src/media/newApi.ts b/src/media/newApi.ts
+index 94c5ca705b5021034467508362064361360d38fc..e64d95abb7294764c3d71ddcecb7f70962d2ef59 100644
+--- a/src/media/newApi.ts
++++ b/src/media/newApi.ts
+@@ -173,7 +173,7 @@ export function prepareStream(
+ 
+     // command creation
+     const command = ffmpeg(input)
+-        .addOption('-loglevel', '0')
++        .addOption('-loglevel', '0', '-re', '-i', '-fflag', '+nobuffer', '-flag', '+global_header', '-bsf:a aac_adtstoasc')
+ 
+     // input options
+     const { hardwareAcceleratedDecoding, minimizeLatency, customHeaders } = mergedOptions;

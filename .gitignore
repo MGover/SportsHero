@@ -1,0 +1,11 @@
+LICENSE
+file.xml
+streambot/node_modules/
+dist/
+.env
+streambot/bun.lock
+streambot/videos/
+streambot/logs/
+streambot/tmp/
+streambot/*-base.js
+*.sock
