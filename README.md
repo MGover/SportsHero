@@ -63,6 +63,8 @@ If you get "Logged in as <BotNameHere> then you got everything right so far
 - If the bot replies with "Channel Stream Not Found", that's typically a miss on the Electronic Programme Guide (EPG). There's no perfect EPG's out there. I recommend using the one your service provider gives you before turning to public EPG sources
 
 ## Configuration
+Reanme both .env.example files to .env
+
 /./.env
 
 ```
