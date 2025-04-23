@@ -14,25 +14,42 @@ This is a discord bot that combines the abilities of an official discord bot and
 
 ## Python Dependences
 Open up your OS Terminal and PIP Install the following libraries:
-`pip install discord`
-`pip install requests`
-`pip install dotenv`
+```
+pip install discord
+pip install requests
+pip install dotenv
+```
+
 (TODO: Add these into a python environment)
 
 ## Installation
 1. Clone this repo. Run the following in your OS Terminal:
-   `git clone `
-2. Use Bun to install Node dependences:
-   `cd ./streambot`
-   `bun install`
-3. Configure Environment Variables
+   
+   ```
+   git clone https://github.com/MGover/SportsHero.git
+   ```
+3. Use Bun to install Node dependences:
+   
+   ```
+   cd ./streambot
+   ```
+   
+   ```
+   bun install
+   ```
+
+5. Configure Environment Variables
    - There are 2 .env.example files. One in the project root and another under /streambot/ directory
    - See below on how to configure these values
   
 ## Usage
 Run the following in the project root:
-`python sport-hero.py`
-If you get "logged in as <BotNameHere> then everything is working as expected
+
+```
+python sport-hero.py
+```
+
+If you get "Logged in as <BotNameHere> then you got everything right so far
 
 ## Commands
 |Command|Description|
@@ -47,23 +64,25 @@ If you get "logged in as <BotNameHere> then everything is working as expected
 
 ## Configuration
 /./.env
+
 ```
-{
   DISCORD_BOT_TOKEN = "xxxxxxxxxxxxxxxxxsecretxxxxxxxxxxx"
   M3U_URL = "http://example-iptv.com/get.php?username=example&password=example&type=m3u_plus&output=tsL"
   EPG_URL = "https://epgshare01.online/epgshare01/"
-}
 ```
+
 DISCORD_BOT_TOKEN is the token from your OFFICIAL discord bot. This bot needs [application.commands permission](https://discord.com/developers/docs/topics/permissions) for the slash commands to work. 
+
 M3U_URL is the URL provided to you by your IPTV subscription service. It NEEDS to be formatted with username and password in the link like the example above
+
 EPG_URL is the link to your Electronic Programme Guide. This is how the bot knows what is currently playing on TV. There are publicly available ones but no EPG is perfect. Try to use the one your IPTV service provides you. 
+
 TODO: Allow users to use a local epg.xml 
 
 /./streambot/.env
-```
-{
 
-}# Selfbot options
+```
+# Selfbot options
 TOKEN = "" # Your Discord self-bot token
 PREFIX = "$" # The prefix used to trigger your self-bot commands
 GUILD_ID = "" # The ID of the Discord server your self-bot will be running on
@@ -99,8 +118,11 @@ SERVER_USERNAME = "admin" # The username for the video server's admin interface
 SERVER_PASSWORD = "admin" # The password for the video server's admin interface
 SERVER_PORT = "8080" # The port number the video server will listen on
 ```
+
 The only variable NEEDED is the your Discord Account's self-bot token. See [this wiki on how to find your discord account token](https://github.com/ysdragon/StreamBot/wiki/Get-Discord-user-token)
+
 All other variables are not needed. Only the stream options are used. Everything else is ignored. 
+
 TODO: Reduce size of streambot .env
 
 ## Special Notes:
