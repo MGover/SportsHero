@@ -4,6 +4,7 @@ This is a discord bot that combines the abilities of an official discord bot and
 ## Features
 - Stream Tevelvision Programmes live in Discord
 - Search and Browse currently live programmes using discord slash commands
+- Search and Browse channels within EPG
 
 ## Requirements
 - [Bun](https://bun.sh/)
@@ -56,6 +57,7 @@ If you get "Logged in as <BotNameHere> then you got everything right so far
 |Command|Description|
 |---------|---------|
 |/watch| An interactive slash command that will show you currently active programmes matching with what you type|
+|/watch_channel| An interactive slash command that will show you available Channels to stream from|
 |/stop| Tells the bot to stop streaming|
 
 *Special Notes About Commands*: 
@@ -125,8 +127,6 @@ SERVER_PORT = "8080" # The port number the video server will listen on
 The only variable NEEDED is the your Discord Account's self-bot token. See [this wiki on how to find your discord account token](https://github.com/ysdragon/StreamBot/wiki/Get-Discord-user-token)
 
 All other variables are not needed. Only the stream options are used. Everything else is ignored. 
-
-TODO: Reduce size of streambot .env
 
 ## Special Notes:
 - If it isn't obvious by now, this bot borrows heavily from [StreamBot](https://github.com/ysdragon/StreamBot) . I merely added IPTV and Discord Bot function. If you are developer on the StreamBot project and reading this, please add these features to your project. I'd do it myself but I don't feel like learning TS/JS/Node. Feel free to borrow from my Python code or make a request for my assistance if needed
