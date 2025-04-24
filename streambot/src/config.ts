@@ -9,10 +9,6 @@ const VALID_VIDEO_CODECS = ['VP8', 'H264', 'H265', 'VP9', 'AV1'];
 export default {
     // Selfbot options
     token: process.env.TOKEN || '',
-    prefix: process.env.PREFIX || '',
-    guildId: process.env.GUILD_ID ? process.env.GUILD_ID : '',
-    cmdChannelId: process.env.COMMAND_CHANNEL_ID ? process.env.COMMAND_CHANNEL_ID : '',
-    videoChannelId: process.env.VIDEO_CHANNEL_ID ? process.env.VIDEO_CHANNEL_ID : '',
 
     // General options
     videosDir: process.env.VIDEOS_DIR ? process.env.VIDEOS_DIR : './videos',
@@ -28,12 +24,6 @@ export default {
     hardwareAcceleratedDecoding: process.env.STREAM_HARDWARE_ACCELERATION ? parseBoolean(process.env.STREAM_HARDWARE_ACCELERATION) : false,
     h26xPreset: process.env.STREAM_H26X_PRESET ? parsePreset(process.env.STREAM_H26X_PRESET) : 'ultrafast',
     videoCodec: process.env.STREAM_VIDEO_CODEC ? parseVideoCodec(process.env.STREAM_VIDEO_CODEC) : 'H264',
-
-    // Videos server options
-    server_enabled: process.env.SERVER_ENABLED ? parseBoolean(process.env.SERVER_ENABLED) : false,
-    server_username: process.env.SERVER_USERNAME ? process.env.SERVER_USERNAME : 'admin',
-    server_password: bcrypt.hashSync(process.env.SERVER_PASSWORD ? process.env.SERVER_PASSWORD : 'admin', 10),
-    server_port: parseInt(process.env.SERVER_PORT ? process.env.SERVER_PORT : '8080'),
 }
 
 function parseVideoCodec(value: string): "VP8" | "H264" | "H265" {

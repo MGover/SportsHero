@@ -47,8 +47,8 @@ const streamStatus = {
     playing: false,
     manualStop: false,
     channelInfo: {
-        guildId: config.guildId,
-        channelId: config.videoChannelId,
+        guildId: "",
+        channelId: "",
     }
 }
 
@@ -81,13 +81,8 @@ async function stopVideo() {
 }
 
 // Function to play video
-async function playVideo(video: string, title?: string, channelIdparam?: string) {
+async function playVideo(video: string, title?: string, channelId?: string, guildId?: string) {
     logger.info("Starting video: " + video);
-    let channelId = config.videoChannelId!;
-    if (channelId) {
-        channelId = channelIdparam
-    }
-    const guildId = config.guildId!;
     logger.info("GuildID: " + guildId + "\nChannelId: " + channelId)
     // Reset manual stop flag
     streamStatus.manualStop = false;
@@ -195,11 +190,11 @@ rl.on('line', (input: string) => {
     const firstFour = input.substring(0, 4);
     switch (firstFour) {
       case 'http':
-        const [link, channelId, ...rest] = input.trim().split(" ");
+        const [link, channelId, guildId, ...rest] = input.trim().split(" ");
         const title = rest.join(" ");
-        logger.info(`Link: ${link}\nTitle: ${title}\nChannelID: ${channelId}`);
+        logger.info(`Link: ${link}\nTitle: ${title}\nChannelID: ${channelId}\nGuildID: ${guildId}`);
         logger.info("Attempting to play video");
-        playVideo(link, title, channelId);
+        playVideo(link, title, channelId, guildId);
         break;
       case 'stop':
         logger.info(`Leaving and stopping`);

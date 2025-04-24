@@ -130,6 +130,7 @@ async def watch(interaction: discord.Interaction, searchterm: str):
         await interaction.followup.send("Channel stream not found.")
         return
     
+    guild = interaction.guild_id
     channel = interaction.user.voice.channel
     global proc_bun
     if proc_bun is not None:
@@ -150,7 +151,7 @@ async def watch(interaction: discord.Interaction, searchterm: str):
 
     time.sleep(3)
     await interaction.followup.send(f"Streaming **{searchterm}** in the voice channel!")
-    await proc_bun.communicate(channel_url.encode('utf-8')+b" "+str(channel.id).encode('utf-8')+b" "+searchterm.encode('utf-8')+b"\n")
+    await proc_bun.communicate(channel_url.encode('utf-8')+b" "+str(channel.id).encode('utf-8')+b" "+str(guild).encode('utf-8')+b" "+searchterm.encode('utf-8')+b"\n")
 
 @tree.command(name="stop", description="stop the current stream")
 async def stop(interaction: discord.Interaction):
@@ -167,9 +168,65 @@ async def stop(interaction: discord.Interaction):
             print("Bun process died somehow")
     proc_bun = None
 
+@tree.command(name="watch_channel", description="Choose from channels")
+async def watch_channel(interaction: discord.Interaction, channel_id: str):
+    if not interaction.user.voice:
+        await interaction.response.send_message("You need to be in a voice channel to use this command.", ephemeral=True)
+        return
+
+    global url
+    global username
+    global password
+    container_extension = "m3u8"
+    await interaction.response.defer()
+
+    m3u_content = await fetch_m3u()
+    channel_url = None
+
+    for line in m3u_content:
+        if line["epg_channel_id"] == channel_id:
+            container_extension = line.get("container_extension", "m3u8")
+            stream_id = line["stream_id"]
+            stream_type = line["stream_type"]
+            channel_url = f"{url}/{stream_type}/{username}/{password}/{stream_id}.{container_extension}"
+            break
+    
+    # channel_url = f"{url}/{'live'}/{username}/{password}/{368529}.{container_extension}"
+    print(channel_url)
+    if not channel_url:
+        await interaction.followup.send("Channel stream not found.")
+        return
+    
+    guild = interaction.guild_id
+    channel = interaction.user.voice.channel
+    global proc_bun
+    if proc_bun is not None:
+        print("killing old bun")
+        if proc_bun.returncode is None:
+            proc_bun.communicate(b"stop\n")
+            time.sleep(10)
+            proc_bun.terminate()
+        else:
+            print("bun proc already died somehow")
+    proc_bun = await asyncio.create_subprocess_exec(
+            "bun", "run", "start",
+            cwd=r"./streambot",
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+            )
+
+    time.sleep(3)
+    await interaction.followup.send(f"Streaming **{channel_id}** in the voice channel!")
+    await proc_bun.communicate(channel_url.encode('utf-8')+b" "+str(channel.id).encode('utf-8')+b" "+str(guild).encode('utf-8')+b" "+channel_id.encode('utf-8')+b"\n")
+
 @watch.autocomplete("searchterm")
 async def search_autocomplete(interaction: discord.Interaction, current: str):
     return [app_commands.Choice(name=title, value=title) for title, channel in epg_data if current.lower() in title.lower()][:25]
+
+@watch_channel.autocomplete("searchterm")
+async def search_autocomplete(interaction: discord.Interaction, current: str):
+    return [app_commands.Choice(name=channel, value=channel) for title, channel in epg_data if current.lower() in channel.lower()][:25]
 
 @bot.event
 async def on_ready():
