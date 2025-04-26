@@ -224,7 +224,7 @@ async def watch_channel(interaction: discord.Interaction, channel_id: str):
 async def search_autocomplete(interaction: discord.Interaction, current: str):
     return [app_commands.Choice(name=title, value=title) for title, channel in epg_data if current.lower() in title.lower()][:25]
 
-@watch_channel.autocomplete("searchterm")
+@watch_channel.autocomplete("channel_id")
 async def search_autocomplete(interaction: discord.Interaction, current: str):
     return [app_commands.Choice(name=channel, value=channel) for title, channel in epg_data if current.lower() in channel.lower()][:25]
 
