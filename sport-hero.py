@@ -28,14 +28,20 @@ bot = discord.Client(intents=intents)
 tree = app_commands.CommandTree(bot)
 
 # m3u data
-pattern = r'(http[s]?://[^/]+)/get\.php\?username=([^&]*)&password=([^&]*)&type=(m3u_plus|m3u|&output=m3u8)'
+if not M3U_URL:
+    raise RuntimeError("M3U_URL not set in environment")
+
+pattern = r'(http[s]?://[^/]+)/get\.php\?username=([^&]*)&password=([^&]*)&type=(m3u_plus|m3u)'
 match = re.match(pattern, M3U_URL)
+if not match:
+    raise RuntimeError("M3U_URL environment variable not in expected format")
+
 url = match.group(1)
 username = match.group(2)
 password = match.group(3)
-stream_url = url+"/player_api.php"
+stream_url = url + "/player_api.php"
 epg_url = f"{url}/xmltv.php?username={username}&password={password}"
-params={'username':username,'password':password,'action':"get_live_streams",'catergory_id':''}
+params = {'username': username, 'password': password, 'action': "get_live_streams", 'catergory_id': ''}
 CUSTOM_USER_AGENT = (
     "Connection: Keep-Alive User-Agent: okhttp/5.0.0-alpha.2 "
     "Accept-Encoding: gzip, deflate"
@@ -45,37 +51,61 @@ proc_bun = None
 epg_data = []
 
 async def fetch_epg():
-    global epg_url
-    global headers
-    resp = requests.post(url=epg_url, headers=headers, timeout=10)
-    xml_content = []
-    if resp.status_code == 200:
-        xml_content = resp.content
-    else:
-        print(f"Error fetching M3U: {resp.status_code}")
-        return ""
+    """Fetch and populate the global `epg_data` list with (title, channel_id) tuples."""
+    global epg_url, headers, epg_data
+    try:
+        resp = await asyncio.to_thread(requests.post, epg_url, headers=headers, timeout=10)
+    except Exception as e:
+        print(f"Error fetching EPG: {e}")
+        return
+
+    if resp.status_code != 200:
+        print(f"Error fetching EPG: {resp.status_code}")
+        return
+
+    xml_content = resp.content
     root = ET.fromstring(xml_content)
 
     now = datetime.utcnow()
+    epg_data.clear()
     for prog in root.findall('.//programme'):
-        if ((prog.find('title') is None) or (prog.find('title').text is None) or (prog is None)):
+        if prog is None:
             continue
-        title = prog.find('title').text.strip()
+        title_el = prog.find('title')
+        if title_el is None or title_el.text is None:
+            continue
+        title = title_el.text.strip()
         channel = prog.get('channel')
         start_time = parse_epg_time(prog.get('start'))
         stop_time = parse_epg_time(prog.get('stop'))
         if start_time <= now <= stop_time:
-            curr_tup = (title, channel)
-            epg_data.append(curr_tup)
+            epg_data.append((title, channel))
 
 def parse_epg_time(epg_time):
-    """Parses EPG time format 'YYYYMMDDHHMMSS ±TZ' into a datetime object."""
-    time_str, tz_offset = epg_time[:14], epg_time[15:]  # Split timestamp and timezone
-    dt = datetime.strptime(time_str, "%Y%m%d%H%M%S")  # Parse time
+    """Parses EPG time formats like 'YYYYMMDDHHMMSS', 'YYYYMMDDHHMMSS+ZZZZ' or with a space before TZ.
+    Returns a UTC datetime.
+    """
+    if not epg_time:
+        return datetime.min
 
-    # Convert timezone offset to integer and apply it
-    tz_hours = int(tz_offset[:3])  # Get the hours part of ±TZ
-    dt = dt - timedelta(hours=tz_hours)  # Adjust for timezone offset
+    s = epg_time.strip()
+    time_str = s[:14]
+    try:
+        dt = datetime.strptime(time_str, "%Y%m%d%H%M%S")
+    except Exception:
+        return datetime.min
+
+    tz_part = s[14:].strip()
+    if tz_part:
+        # tz_part examples: '+0000', '-0200', '+02'
+        if tz_part[0] in ('+', '-'):
+            try:
+                sign = 1 if tz_part[0] == '+' else -1
+                hours = int(tz_part[1:3])
+                # Convert to UTC by subtracting the offset
+                dt = dt - timedelta(hours=sign * hours)
+            except Exception:
+                pass
 
     return dt
 
@@ -83,15 +113,25 @@ async def fetch_m3u():
     global stream_url
     global params
     global headers
-    resp = requests.post(url=stream_url, data=params, headers=headers, timeout=10)
+    try:
+        resp = await asyncio.to_thread(requests.post, stream_url, data=params, headers=headers, timeout=10)
+    except Exception as e:
+        print(f"Error fetching M3U: {e}")
+        return []
+
     if resp.status_code == 200:
-        return resp.json()
+        try:
+            return resp.json()
+        except Exception:
+            return []
     else:
         print(f"Error fetching M3U: {resp.status_code}")
-        return ""
+        return []
 
 def find_channel(query):
     for title, channel_id in epg_data:
+        if channel_id is None:
+            continue
         if query.lower() in title.lower():
             return channel_id
     return None
@@ -117,12 +157,15 @@ async def watch(interaction: discord.Interaction, searchterm: str):
     channel_url = None
 
     for line in m3u_content:
-        if line["epg_channel_id"] == channel_id:
-            container_extension = line.get("container_extension", "m3u8")
-            stream_id = line["stream_id"]
-            stream_type = line["stream_type"]
-            channel_url = f"{url}/{stream_type}/{username}/{password}/{stream_id}.{container_extension}"
-            break
+        try:
+            if str(line.get("epg_channel_id")) == str(channel_id):
+                container_extension = line.get("container_extension", "m3u8")
+                stream_id = line.get("stream_id")
+                stream_type = line.get("stream_type")
+                channel_url = f"{url}/{stream_type}/{username}/{password}/{stream_id}.{container_extension}"
+                break
+        except Exception:
+            continue
     
     # channel_url = f"{url}/{'live'}/{username}/{password}/{368529}.{container_extension}"
     print(channel_url)
@@ -134,38 +177,50 @@ async def watch(interaction: discord.Interaction, searchterm: str):
     channel = interaction.user.voice.channel
     global proc_bun
     if proc_bun is not None:
-        print("killing old bun")
-        if proc_bun.returncode is None:
-            proc_bun.communicate(b"stop\n")
-            time.sleep(10)
-            proc_bun.terminate()
+        print("killing old streambot process")
+        if proc_bun.returncode is None and proc_bun.stdin:
+            try:
+                proc_bun.stdin.write(b"stop\n")
+                await proc_bun.stdin.drain()
+                await asyncio.sleep(1)
+                proc_bun.terminate()
+            except Exception:
+                pass
         else:
-            print("bun proc already died somehow")
-    proc_bun = await asyncio.create_subprocess_exec(
-            "bun", "run", "start",
-            cwd=r"./streambot",
-            stdin=subprocess.PIPE,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
-            )
+            print("streambot proc already died somehow")
 
-    time.sleep(3)
+    proc_bun = await asyncio.create_subprocess_exec(
+        "npm", "run", "start:node",
+        cwd=r"./streambot",
+        stdin=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL
+    )
+
+    await asyncio.sleep(1)
     await interaction.followup.send(f"Streaming **{searchterm}** in the voice channel!")
-    await proc_bun.communicate(channel_url.encode('utf-8')+b" "+str(channel.id).encode('utf-8')+b" "+str(guild).encode('utf-8')+b" "+searchterm.encode('utf-8')+b"\n")
+    if proc_bun.stdin:
+        payload = channel_url.encode('utf-8') + b" " + str(channel.id).encode('utf-8') + b" " + str(guild).encode('utf-8') + b" " + searchterm.encode('utf-8') + b"\n"
+        proc_bun.stdin.write(payload)
+        await proc_bun.stdin.drain()
 
 @tree.command(name="stop", description="stop the current stream")
 async def stop(interaction: discord.Interaction):
     await interaction.response.send_message("gonna try to kill this guy")
     global proc_bun
     if proc_bun is None:
-        print("bun already killed")
+        print("streambot already killed")
     else:
-        if proc_bun.returncode is None:
-            proc_bun.communicate(b"stop\b")
-            time.sleep(10)
-            proc_bun.terminate()
+        if proc_bun.returncode is None and proc_bun.stdin:
+            try:
+                proc_bun.stdin.write(b"stop\n")
+                await proc_bun.stdin.drain()
+                await asyncio.sleep(1)
+                proc_bun.terminate()
+            except Exception:
+                print("Error sending stop to streambot")
         else:
-            print("Bun process died somehow")
+            print("streambot process died somehow")
     proc_bun = None
 
 @tree.command(name="watch_channel", description="Choose from channels")
@@ -184,12 +239,15 @@ async def watch_channel(interaction: discord.Interaction, channel_id: str):
     channel_url = None
 
     for line in m3u_content:
-        if line["epg_channel_id"] == channel_id:
-            container_extension = line.get("container_extension", "m3u8")
-            stream_id = line["stream_id"]
-            stream_type = line["stream_type"]
-            channel_url = f"{url}/{stream_type}/{username}/{password}/{stream_id}.{container_extension}"
-            break
+        try:
+            if str(line.get("epg_channel_id")) == str(channel_id):
+                container_extension = line.get("container_extension", "m3u8")
+                stream_id = line.get("stream_id")
+                stream_type = line.get("stream_type")
+                channel_url = f"{url}/{stream_type}/{username}/{password}/{stream_id}.{container_extension}"
+                break
+        except Exception:
+            continue
     
     # channel_url = f"{url}/{'live'}/{username}/{password}/{368529}.{container_extension}"
     print(channel_url)
@@ -201,32 +259,40 @@ async def watch_channel(interaction: discord.Interaction, channel_id: str):
     channel = interaction.user.voice.channel
     global proc_bun
     if proc_bun is not None:
-        print("killing old bun")
-        if proc_bun.returncode is None:
-            proc_bun.communicate(b"stop\n")
-            time.sleep(10)
-            proc_bun.terminate()
+        print("killing old streambot process")
+        if proc_bun.returncode is None and proc_bun.stdin:
+            try:
+                proc_bun.stdin.write(b"stop\n")
+                await proc_bun.stdin.drain()
+                await asyncio.sleep(1)
+                proc_bun.terminate()
+            except Exception:
+                pass
         else:
-            print("bun proc already died somehow")
-    proc_bun = await asyncio.create_subprocess_exec(
-            "bun", "run", "start",
-            cwd=r"./streambot",
-            stdin=subprocess.PIPE,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
-            )
+            print("streambot proc already died somehow")
 
-    time.sleep(3)
+    proc_bun = await asyncio.create_subprocess_exec(
+        "npm", "run", "start:node",
+        cwd=r"./streambot",
+        stdin=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL
+    )
+
+    await asyncio.sleep(1)
     await interaction.followup.send(f"Streaming **{channel_id}** in the voice channel!")
-    await proc_bun.communicate(channel_url.encode('utf-8')+b" "+str(channel.id).encode('utf-8')+b" "+str(guild).encode('utf-8')+b" "+channel_id.encode('utf-8')+b"\n")
+    if proc_bun.stdin:
+        payload = channel_url.encode('utf-8') + b" " + str(channel.id).encode('utf-8') + b" " + str(guild).encode('utf-8') + b" " + channel_id.encode('utf-8') + b"\n"
+        proc_bun.stdin.write(payload)
+        await proc_bun.stdin.drain()
 
 @watch.autocomplete("searchterm")
-async def search_autocomplete(interaction: discord.Interaction, current: str):
+async def watch_autocomplete(interaction: discord.Interaction, current: str):
     return [app_commands.Choice(name=title, value=title) for title, channel in epg_data if current.lower() in title.lower()][:25]
 
 @watch_channel.autocomplete("channel_id")
-async def search_autocomplete(interaction: discord.Interaction, current: str):
-    return [app_commands.Choice(name=channel, value=channel) for title, channel in epg_data if current.lower() in channel.lower()][:25]
+async def watch_channel_autocomplete(interaction: discord.Interaction, current: str):
+    return [app_commands.Choice(name=channel, value=channel) for title, channel in epg_data if channel and current.lower() in str(channel).lower()][:25]
 
 @bot.event
 async def on_ready():

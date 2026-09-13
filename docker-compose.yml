@@ -1,0 +1,10 @@
+version: '3.8'
+services:
+  sport-hero:
+    build: .
+    env_file:
+      - .env
+    restart: unless-stopped
+    volumes:
+      - ./:/app
+    network_mode: bridge
