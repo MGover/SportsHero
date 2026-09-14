@@ -137,13 +137,12 @@ def find_channel(query):
     return None
 
 async def get_current_voice_channel(interaction: discord.Interaction):
+    if interaction.user is not None and getattr(interaction.user, "voice", None) is not None:
+        return interaction.user.voice.channel
+
     guild = interaction.guild
     if guild is None:
         return None
-
-    voice_state = guild.voice_states.get(interaction.user.id)
-    if voice_state is not None and voice_state.channel is not None:
-        return voice_state.channel
 
     member = guild.get_member(interaction.user.id)
     if member is None:
@@ -311,10 +310,16 @@ async def watch_channel(interaction: discord.Interaction, channel_id: str):
 
 @watch.autocomplete("searchterm")
 async def watch_autocomplete(interaction: discord.Interaction, current: str):
-    return [app_commands.Choice(name=title, value=title) for title, channel in epg_data if current.lower() in title.lower()][:25]
+    current = (current or "").strip()
+    if not current:
+        return []
+    return [app_commands.Choice(name=title, value=title) for title, channel in epg_data if title and current.lower() in title.lower()][:25]
 
 @watch_channel.autocomplete("channel_id")
 async def watch_channel_autocomplete(interaction: discord.Interaction, current: str):
+    current = (current or "").strip()
+    if not current:
+        return []
     return [app_commands.Choice(name=channel, value=channel) for title, channel in epg_data if channel and current.lower() in str(channel).lower()][:25]
 
 @bot.event
