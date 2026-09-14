@@ -128,36 +128,57 @@ async def leave_current_stream():
         await send_streambot_command({"cmd": "leave", "session_id": session_id})
     active_stream_session = None
 
-async def fetch_epg():
+async def fetch_epg(max_retries=4, retry_delay=5):
     """Fetch and populate the global `epg_data` list with (title, channel_id) tuples."""
     global epg_url, headers, epg_data
-    try:
-        resp = await asyncio.to_thread(requests.post, epg_url, headers=headers, timeout=10)
-    except Exception as e:
-        print(f"Error fetching EPG: {e}")
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            resp = await asyncio.to_thread(requests.post, epg_url, headers=headers, timeout=10)
+        except Exception as e:
+            if attempt == max_retries:
+                print(f"Error fetching EPG after {max_retries} attempts: {e}")
+                return
+            print(f"EPG fetch attempt {attempt}/{max_retries} failed: {e}; retrying in {retry_delay}s")
+            await asyncio.sleep(retry_delay)
+            continue
+
+        if resp.status_code != 200:
+            if attempt == max_retries:
+                print(f"Error fetching EPG after {max_retries} attempts: {resp.status_code}")
+                return
+            print(f"EPG fetch attempt {attempt}/{max_retries} failed with status {resp.status_code}; retrying in {retry_delay}s")
+            await asyncio.sleep(retry_delay)
+            continue
+
+        try:
+            xml_content = resp.content
+            root = ET.fromstring(xml_content)
+        except Exception as e:
+            if attempt == max_retries:
+                print(f"Error parsing EPG XML after {max_retries} attempts: {e}")
+                return
+            print(f"EPG XML parse attempt {attempt}/{max_retries} failed: {e}; retrying in {retry_delay}s")
+            await asyncio.sleep(retry_delay)
+            continue
+
+        now = datetime.utcnow()
+        epg_data.clear()
+        for prog in root.findall('.//programme'):
+            if prog is None:
+                continue
+            title_el = prog.find('title')
+            if title_el is None or title_el.text is None:
+                continue
+            title = title_el.text.strip()
+            channel = prog.get('channel')
+            start_time = parse_epg_time(prog.get('start'))
+            stop_time = parse_epg_time(prog.get('stop'))
+            if start_time <= now <= stop_time:
+                epg_data.append((title, channel))
         return
 
-    if resp.status_code != 200:
-        print(f"Error fetching EPG: {resp.status_code}")
-        return
-
-    xml_content = resp.content
-    root = ET.fromstring(xml_content)
-
-    now = datetime.utcnow()
-    epg_data.clear()
-    for prog in root.findall('.//programme'):
-        if prog is None:
-            continue
-        title_el = prog.find('title')
-        if title_el is None or title_el.text is None:
-            continue
-        title = title_el.text.strip()
-        channel = prog.get('channel')
-        start_time = parse_epg_time(prog.get('start'))
-        stop_time = parse_epg_time(prog.get('stop'))
-        if start_time <= now <= stop_time:
-            epg_data.append((title, channel))
+    print("EPG fetch exited without success")
 
 def parse_epg_time(epg_time):
     """Parses EPG time formats like 'YYYYMMDDHHMMSS', 'YYYYMMDDHHMMSS+ZZZZ' or with a space before TZ.

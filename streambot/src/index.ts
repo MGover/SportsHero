@@ -74,12 +74,14 @@ async function joinVoiceWithDiagnostics(guildId?: string, channelId?: string) {
     return Promise.race([
         (async () => {
             logger.info('joinVoice diagnostics: starting native joinVoice call');
+            const startedAt = Date.now();
             const result = await streamer.joinVoice(guildId, channelId);
-            logger.info('joinVoice diagnostics: native joinVoice resolved');
+            logger.info(`joinVoice diagnostics: native joinVoice resolved after ${Date.now() - startedAt}ms`);
             return result;
         })(),
         new Promise((_, reject) => {
-            setTimeout(() => reject(new Error(`joinVoice timed out after 20s for guild=${guildId} channel=${channelId}`)), 20000);
+            const timeoutMs = 20000;
+            setTimeout(() => reject(new Error(`joinVoice timed out after ${timeoutMs}ms for guild=${guildId} channel=${channelId}`)), timeoutMs);
         })
     ]) as Promise<void>;
 }
