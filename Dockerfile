@@ -18,7 +18,7 @@ FROM node:20-bookworm-slim
 WORKDIR /app
 
 # Install python and ffmpeg for streaming
-RUN apt-get update && apt-get install -y python3 python3-pip ffmpeg \
+RUN apt-get update && apt-get install -y python3 python3-pip python3-venv ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy built streambot
@@ -28,9 +28,11 @@ COPY streambot/package.json ./streambot/
 
 # Copy python app
 COPY requirements.txt ./
-RUN pip3 install --no-cache-dir -r requirements.txt
+RUN python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 ENV PYTHONUNBUFFERED=1
 
-CMD ["python3", "sport-hero.py"]
+CMD ["python", "sport-hero.py"]
