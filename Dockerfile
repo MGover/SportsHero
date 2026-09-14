@@ -1,5 +1,5 @@
 # Multi-stage: build streambot
-FROM node:20-bullseye as builder
+FROM node:20-bookworm AS builder
 WORKDIR /app
 
 # Install build deps for native modules
@@ -10,11 +10,11 @@ RUN apt-get update && apt-get install -y python3 make g++ \
 COPY streambot/package.json streambot/tsconfig.json streambot/patches ./streambot/
 COPY streambot/src ./streambot/src
 WORKDIR /app/streambot
-RUN npm ci
+RUN npm install
 RUN npm run build
 
 # Final image: node base with python installed
-FROM node:20-bullseye-slim
+FROM node:20-bookworm-slim
 WORKDIR /app
 
 # Install python and ffmpeg for streaming
