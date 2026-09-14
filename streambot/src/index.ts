@@ -27,11 +27,21 @@ const streamStatus = {
     joinsucc: false,
     playing: false,
     manualStop: false,
+    currentSessionId: '',
     channelInfo: {
         guildId: config.guildId || '',
         channelId: config.videoChannelId || '',
     }
 };
+
+interface StreamCommand {
+    cmd?: string;
+    session_id?: string;
+    video_url?: string;
+    channel_id?: string;
+    guild_id?: string;
+    title?: string;
+}
 
 if (!fs.existsSync(path.dirname(config.previewCacheDir))) {
     fs.mkdirSync(path.dirname(config.previewCacheDir), { recursive: true });
@@ -50,10 +60,6 @@ const status_watch = (name: string): ActivityOptions => new CustomStatus(new Cli
     .setState(`Playing ${name}...`) as unknown as ActivityOptions;
 
 async function cleanupStreamStatus() {
-    if (streamStatus.manualStop) {
-        return;
-    }
-
     try {
         controller?.abort();
         streamer.stopStream();
@@ -64,14 +70,20 @@ async function cleanupStreamStatus() {
         streamStatus.joinsucc = false;
         streamStatus.playing = false;
         streamStatus.manualStop = false;
+        streamStatus.currentSessionId = '';
         streamStatus.channelInfo = { guildId: '', channelId: '' };
     } catch (error) {
         logger.info('Error during cleanup: ' + error);
     }
 }
 
-async function stopVideo() {
-    if (!streamStatus.joined) {
+async function stopVideo(sessionId?: string) {
+    if (sessionId && streamStatus.currentSessionId && sessionId !== streamStatus.currentSessionId) {
+        logger.info(`Ignoring stop for stale session ${sessionId}; active session is ${streamStatus.currentSessionId}`);
+        return;
+    }
+
+    if (!streamStatus.joined && !streamStatus.playing) {
         logger.info('already stopped');
         return;
     }
@@ -86,17 +98,29 @@ async function stopVideo() {
         streamStatus.joined = false;
         streamStatus.joinsucc = false;
         streamStatus.playing = false;
+        streamStatus.currentSessionId = '';
         streamStatus.channelInfo = { guildId: '', channelId: '' };
     } catch (error) {
         logger.info('Error stopping video: ' + error);
     }
 }
 
-async function playVideo(video: string, title?: string, channelId?: string, guildId?: string) {
+async function playVideo(sessionId: string, video: string, title?: string, channelId?: string, guildId?: string) {
+    if (streamStatus.currentSessionId && streamStatus.currentSessionId !== sessionId) {
+        logger.info(`Replacing stale session ${streamStatus.currentSessionId} with ${sessionId}`);
+        await stopVideo(streamStatus.currentSessionId);
+    }
+
+    if (streamStatus.currentSessionId === sessionId && streamStatus.playing) {
+        logger.info(`Session ${sessionId} already playing; ignoring duplicate play command`);
+        return;
+    }
+
     logger.info('Starting video: ' + video);
-    logger.info(`Selfbot join attempt: guild=${guildId} channel=${channelId} title=${title ?? ''}`);
+    logger.info(`Selfbot join attempt: guild=${guildId} channel=${channelId} title=${title ?? ''} session=${sessionId}`);
 
     streamStatus.manualStop = false;
+    streamStatus.currentSessionId = sessionId;
 
     try {
         logger.info('Calling streamer.joinVoice...');
@@ -120,18 +144,26 @@ async function playVideo(video: string, title?: string, channelId?: string, guil
         });
 
         logger.info('Starting playStream...');
-        await playStream(output, streamer, undefined, controller.signal).catch((err) => {
+        try {
+            await playStream(output, streamer, undefined, controller.signal);
+            logger.info(`playStream resolved without raising an exception for session ${sessionId}`);
+        } catch (err) {
             logger.info('playStream catch: ' + err);
             controller?.abort();
-        });
+            throw err;
+        }
 
-        logger.info('Finished playing video');
+        if (!streamStatus.manualStop && streamStatus.currentSessionId === sessionId) {
+            logger.info(`playStream ended without a manual stop for session ${sessionId}; cleaning up`);
+            await cleanupStreamStatus();
+        }
     } catch (error) {
         logger.info('Error occurred while playing video: ' + error);
-        logger.info(`Join/play debug: guild=${guildId} channel=${channelId} video=${video}`);
+        logger.info(`Join/play debug: guild=${guildId} channel=${channelId} video=${video} session=${sessionId}`);
         controller?.abort();
-    } finally {
-        await cleanupStreamStatus();
+        if (!streamStatus.manualStop && streamStatus.currentSessionId === sessionId) {
+            await cleanupStreamStatus();
+        }
     }
 }
 
@@ -172,37 +204,76 @@ const rl = readline.createInterface({
     output: process.stdout
 });
 
-logger.info('Type something! (type \'exit\' to quit)');
+logger.info('Streambot ready for JSON session commands.');
 
-rl.on('line', (input: string) => {
-    logger.info(`Input recieved: ${input}`);
-    const prefix = input.substring(0, 4);
+rl.on('line', async (input: string) => {
+    const trimmed = input.trim();
+    if (!trimmed) {
+        return;
+    }
 
-    switch (prefix) {
-        case 'http': {
-            const [link, channelId, guildId, ...rest] = input.trim().split(' ');
-            const title = rest.join(' ');
-            logger.info(`Link: ${link}\nTitle: ${title}\nChannelID: ${channelId}\nGuildID: ${guildId}`);
-            logger.info('Attempting to play video');
-            playVideo(link, title, channelId, guildId).catch((err) => {
+    logger.info(`Input received: ${trimmed}`);
+
+    try {
+        const command = JSON.parse(trimmed) as StreamCommand;
+        const sessionId = command.session_id || '';
+        const cmd = command.cmd || '';
+
+        if (cmd === 'play') {
+            const videoUrl = command.video_url || '';
+            const channelId = command.channel_id || '';
+            const guildId = command.guild_id || '';
+            const title = command.title || '';
+
+            if (!videoUrl || !channelId || !guildId) {
+                logger.info(`Rejected invalid play command: ${trimmed}`);
+                return;
+            }
+
+            logger.info(`Dispatching play for session=${sessionId} guild=${guildId} channel=${channelId}`);
+            await playVideo(sessionId, videoUrl, title, channelId, guildId).catch((err) => {
                 logger.info(`playVideo promise rejected: ${err}`);
             });
-            break;
+            return;
         }
-        case 'stop': {
-            logger.info('Leaving and stopping');
-            stopVideo().catch((err) => {
+
+        if (cmd === 'stop') {
+            logger.info(`Stopping stream for session=${sessionId || '<none>'}`);
+            await stopVideo(sessionId).catch((err) => {
                 logger.info(`stopVideo promise rejected: ${err}`);
             });
-            break;
+            return;
         }
-        case 'exit': {
+
+        if (cmd === 'exit') {
             logger.info('👋 Goodbye!');
+            await stopVideo();
             rl.close();
-            break;
+            return;
         }
-        default:
-            logger.info(`🤔 You said: ${input}`);
+
+        logger.info(`Unrecognized command: ${cmd}`);
+    } catch (error) {
+        const prefix = trimmed.substring(0, 4);
+        if (prefix === 'http') {
+            const [link, channelId, guildId, ...rest] = trimmed.split(' ');
+            const title = rest.join(' ');
+            logger.info(`Legacy URL command received: ${link} channel=${channelId} guild=${guildId}`);
+            await playVideo(`legacy-${Date.now()}`, link, title, channelId, guildId).catch((err) => {
+                logger.info(`legacy playVideo promise rejected: ${err}`);
+            });
+            return;
+        }
+
+        if (trimmed === 'stop') {
+            logger.info('Legacy stop command received');
+            await stopVideo().catch((err) => {
+                logger.info(`legacy stopVideo promise rejected: ${err}`);
+            });
+            return;
+        }
+
+        logger.info(`Could not parse command input: ${trimmed} | ${error}`);
     }
 });
 
