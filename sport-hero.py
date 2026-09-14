@@ -137,31 +137,48 @@ def find_channel(query):
     return None
 
 async def get_current_voice_channel(interaction: discord.Interaction):
+    print(f"DEBUG voice check: user={interaction.user.id} guild={interaction.guild_id} guild_obj={interaction.guild}")
+
     if interaction.user is not None and getattr(interaction.user, "voice", None) is not None:
+        print(f"DEBUG voice check: interaction.user.voice.channel={interaction.user.voice.channel.id if interaction.user.voice.channel else None}")
         return interaction.user.voice.channel
 
     guild = interaction.guild
     if guild is None:
+        print("DEBUG voice check: guild is None")
         return None
 
     member = guild.get_member(interaction.user.id)
+    print(f"DEBUG voice check: guild.get_member returned={member}")
     if member is None:
         try:
             member = await guild.fetch_member(interaction.user.id)
-        except Exception:
+            print(f"DEBUG voice check: guild.fetch_member returned={member}")
+        except Exception as e:
+            print(f"DEBUG voice check: fetch_member failed: {e}")
             return None
 
-    if member is None or member.voice is None:
+    if member is None:
+        print("DEBUG voice check: member is None")
         return None
 
+    print(f"DEBUG voice check: member.voice={member.voice}")
+    if member.voice is None:
+        print("DEBUG voice check: member not in voice")
+        return None
+
+    print(f"DEBUG voice check: member.voice.channel={member.voice.channel.id if member.voice.channel else None}")
     return member.voice.channel
 
 @tree.command(name="watch", description="Watch a live TV channel")
 async def watch(interaction: discord.Interaction, searchterm: str):
+    print(f"DEBUG watch command: user={interaction.user.id} guild={interaction.guild_id} searchterm={searchterm}")
     voice_channel = await get_current_voice_channel(interaction)
     if voice_channel is None:
+        print("DEBUG watch command: no voice channel found for user")
         await interaction.response.send_message("You need to be in a voice channel to use this command.", ephemeral=True)
         return
+    print(f"DEBUG watch command: resolved voice_channel={voice_channel.id} name={voice_channel.name}")
 
     global url
     global username
@@ -246,10 +263,13 @@ async def stop(interaction: discord.Interaction):
 
 @tree.command(name="watch_channel", description="Choose from channels")
 async def watch_channel(interaction: discord.Interaction, channel_id: str):
+    print(f"DEBUG watch_channel command: user={interaction.user.id} guild={interaction.guild_id} channel_id={channel_id}")
     voice_channel = await get_current_voice_channel(interaction)
     if voice_channel is None:
+        print("DEBUG watch_channel command: no voice channel found for user")
         await interaction.response.send_message("You need to be in a voice channel to use this command.", ephemeral=True)
         return
+    print(f"DEBUG watch_channel command: resolved voice_channel={voice_channel.id} name={voice_channel.name}")
 
     global url
     global username
