@@ -204,5 +204,5 @@ rl.on('line', (input: string) => {
         default:
             logger.info(`🤔 You said: ${input}`);
     }
-});  });
+});
 
