@@ -141,6 +141,10 @@ async def get_current_voice_channel(interaction: discord.Interaction):
     if guild is None:
         return None
 
+    voice_state = guild.voice_states.get(interaction.user.id)
+    if voice_state is not None and voice_state.channel is not None:
+        return voice_state.channel
+
     member = guild.get_member(interaction.user.id)
     if member is None:
         try:
