@@ -59,6 +59,31 @@ const status_watch = (name: string): ActivityOptions => new CustomStatus(new Cli
     .setEmoji('📽')
     .setState(`Playing ${name}...`) as unknown as ActivityOptions;
 
+async function joinVoiceWithDiagnostics(guildId?: string, channelId?: string) {
+    logger.info(`joinVoice diagnostics: clientUser=${client.user?.id ?? 'unknown'} guildId=${guildId} channelId=${channelId}`);
+    logger.info(`joinVoice diagnostics: cachedGuilds=${Array.from(client.guilds.cache.keys()).slice(0, 10).join(', ') || 'none'}`);
+
+    const guild = guildId ? client.guilds.cache.get(guildId) : undefined;
+    const channel = channelId ? (guild?.channels.cache.get(channelId) ?? client.channels.cache.get(channelId)) : undefined;
+
+    logger.info(`joinVoice diagnostics: guildFound=${!!guild} guildName=${guild?.name ?? 'n/a'}`);
+    logger.info(`joinVoice diagnostics: channelFound=${!!channel} channelType=${(channel as any)?.type ?? 'n/a'} channelName=${(channel as any)?.name ?? 'n/a'}`);
+    logger.info(`joinVoice diagnostics: guildVoiceChannelExists=${!!guild?.channels.cache.get(channelId ?? '')}`);
+    logger.info(`joinVoice diagnostics: clientChannelCacheHas=${client.channels.cache.has(channelId ?? '')}`);
+
+    return Promise.race([
+        (async () => {
+            logger.info('joinVoice diagnostics: starting native joinVoice call');
+            const result = await streamer.joinVoice(guildId, channelId);
+            logger.info('joinVoice diagnostics: native joinVoice resolved');
+            return result;
+        })(),
+        new Promise((_, reject) => {
+            setTimeout(() => reject(new Error(`joinVoice timed out after 20s for guild=${guildId} channel=${channelId}`)), 20000);
+        })
+    ]) as Promise<void>;
+}
+
 async function cleanupStreamStatus() {
     try {
         controller?.abort();
@@ -124,7 +149,7 @@ async function playVideo(sessionId: string, video: string, title?: string, chann
 
     try {
         logger.info('Calling streamer.joinVoice...');
-        await streamer.joinVoice(guildId, channelId);
+        await joinVoiceWithDiagnostics(guildId, channelId);
         logger.info('joinVoice resolved successfully');
 
         streamStatus.joined = true;
@@ -137,8 +162,10 @@ async function playVideo(sessionId: string, video: string, title?: string, chann
 
         controller?.abort();
         controller = new AbortController();
+        logger.info(`stream start: preparing ffmpeg for session=${sessionId} source=${video}`);
 
         const { command, output } = prepareStream(video, streamOpts, controller.signal);
+        logger.info(`stream start: ffmpeg command object created for session=${sessionId}`);
         command.on('start', (commandLine) => {
             logger.info('FFmpeg started: ' + commandLine);
         });
@@ -155,7 +182,7 @@ async function playVideo(sessionId: string, video: string, title?: string, chann
             logger.info('FFmpeg ended normally for session ' + sessionId);
         });
 
-        logger.info('Starting playStream...');
+        logger.info(`stream start: invoking playStream for session=${sessionId}`);
         try {
             await playStream(output, streamer, undefined, controller.signal);
             logger.info(`playStream resolved without raising an exception for session ${sessionId}`);
