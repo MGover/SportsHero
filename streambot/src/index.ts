@@ -171,7 +171,27 @@ process.on('uncaughtException', (error) => {
 });
 
 // Login to Discord
-streamer.client.login(config.token);
+if (!config.token) {
+    logger.info("Selfbot token missing. Set streambot/.env TOKEN=... before starting the streambot.");
+    process.exit(1);
+}
+
+streamer.client.on("error", (error) => {
+    logger.info("Discord client error: " + error);
+});
+
+streamer.client.on("disconnect", (event) => {
+    logger.info("Discord client disconnected: " + JSON.stringify(event));
+});
+
+streamer.client.on("ready", () => {
+    logger.info(`Selfbot ready: ${streamer.client.user?.tag ?? "unknown user"}`);
+});
+
+streamer.client.login(config.token).catch((error) => {
+    logger.info("Selfbot login failed: " + error);
+    process.exit(1);
+});
 
 // start.ts
 const readline = require('readline');
