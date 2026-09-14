@@ -70,9 +70,12 @@ async def start_streambot_process():
 
     await asyncio.sleep(2)
     if proc_bun.returncode is not None:
+        stdout_data = await proc_bun.stdout.read() if proc_bun.stdout else b""
         stderr_data = await proc_bun.stderr.read() if proc_bun.stderr else b""
+        stdout_text = stdout_data.decode("utf-8", errors="replace").strip()
         stderr_text = stderr_data.decode("utf-8", errors="replace").strip()
-        detail = stderr_text or "streambot process exited without output"
+        detail_parts = [part for part in [stdout_text, stderr_text] if part]
+        detail = "\n".join(detail_parts) if detail_parts else "streambot process exited without output"
         raise RuntimeError(f"streambot failed to start: {detail}")
 
     print("DEBUG streambot: started successfully and is still running")
