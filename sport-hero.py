@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 import time
 import asyncio
 import os
+import shutil
 from pathlib import Path
 from dotenv import load_dotenv # type: ignore
 
@@ -49,6 +50,33 @@ CUSTOM_USER_AGENT = (
 headers = {'User-Agent': CUSTOM_USER_AGENT}
 proc_bun = None
 epg_data = []
+
+async def start_streambot_process():
+    """Start the Node selfbot and fail with a readable error if it exits immediately."""
+    global proc_bun
+    streambot_dir = Path(__file__).resolve().parent / "streambot"
+    node_bin = shutil.which("node")
+    if not node_bin:
+        raise RuntimeError("node not found in PATH; streambot cannot start")
+
+    proc_bun = await asyncio.create_subprocess_exec(
+        node_bin,
+        "dist/index.js",
+        cwd=str(streambot_dir),
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    await asyncio.sleep(2)
+    if proc_bun.returncode is not None:
+        stderr_data = await proc_bun.stderr.read() if proc_bun.stderr else b""
+        stderr_text = stderr_data.decode("utf-8", errors="replace").strip()
+        detail = stderr_text or "streambot process exited without output"
+        raise RuntimeError(f"streambot failed to start: {detail}")
+
+    print("DEBUG streambot: started successfully and is still running")
+    return proc_bun
 
 async def fetch_epg():
     """Fetch and populate the global `epg_data` list with (title, channel_id) tuples."""
@@ -246,20 +274,32 @@ async def watch(interaction: discord.Interaction, searchterm: str):
         else:
             print("streambot proc already died somehow")
 
-    proc_bun = await asyncio.create_subprocess_exec(
-        "npm", "run", "start:node",
-        cwd=r"./streambot",
-        stdin=subprocess.PIPE,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL
-    )
+    try:
+        proc_bun = await start_streambot_process()
+    except Exception as e:
+        print(f"DEBUG streambot startup failed: {e}")
+        await interaction.followup.send(f"Streambot failed to start: {e}")
+        return
 
     await asyncio.sleep(1)
     await interaction.followup.send(f"Streaming **{searchterm}** in the voice channel!")
-    if proc_bun.stdin:
+    if proc_bun.stdin and proc_bun.returncode is None:
         payload = channel_url.encode('utf-8') + b" " + str(channel.id).encode('utf-8') + b" " + str(guild).encode('utf-8') + b" " + searchterm.encode('utf-8') + b"\n"
-        proc_bun.stdin.write(payload)
-        await proc_bun.stdin.drain()
+        try:
+            proc_bun.stdin.write(payload)
+            await proc_bun.stdin.drain()
+        except Exception as e:
+            stderr_data = await proc_bun.stderr.read() if proc_bun.stderr else b""
+            stderr_text = stderr_data.decode("utf-8", errors="replace").strip()
+            print(f"DEBUG streambot stdin write failed: {e}")
+            if stderr_text:
+                print(f"DEBUG streambot stderr: {stderr_text}")
+            await interaction.followup.send(f"Failed to send stream payload: {e}")
+            return
+    else:
+        msg = "streambot process is not running"
+        print(f"DEBUG streambot: {msg}")
+        await interaction.followup.send(msg)
 
 @tree.command(name="stop", description="stop the current stream")
 async def stop(interaction: discord.Interaction):
@@ -332,20 +372,32 @@ async def watch_channel(interaction: discord.Interaction, channel_id: str):
         else:
             print("streambot proc already died somehow")
 
-    proc_bun = await asyncio.create_subprocess_exec(
-        "npm", "run", "start:node",
-        cwd=r"./streambot",
-        stdin=subprocess.PIPE,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL
-    )
+    try:
+        proc_bun = await start_streambot_process()
+    except Exception as e:
+        print(f"DEBUG streambot startup failed: {e}")
+        await interaction.followup.send(f"Streambot failed to start: {e}")
+        return
 
     await asyncio.sleep(1)
     await interaction.followup.send(f"Streaming **{channel_id}** in the voice channel!")
-    if proc_bun.stdin:
+    if proc_bun.stdin and proc_bun.returncode is None:
         payload = channel_url.encode('utf-8') + b" " + str(channel.id).encode('utf-8') + b" " + str(guild).encode('utf-8') + b" " + channel_id.encode('utf-8') + b"\n"
-        proc_bun.stdin.write(payload)
-        await proc_bun.stdin.drain()
+        try:
+            proc_bun.stdin.write(payload)
+            await proc_bun.stdin.drain()
+        except Exception as e:
+            stderr_data = await proc_bun.stderr.read() if proc_bun.stderr else b""
+            stderr_text = stderr_data.decode("utf-8", errors="replace").strip()
+            print(f"DEBUG streambot stdin write failed: {e}")
+            if stderr_text:
+                print(f"DEBUG streambot stderr: {stderr_text}")
+            await interaction.followup.send(f"Failed to send stream payload: {e}")
+            return
+    else:
+        msg = "streambot process is not running"
+        print(f"DEBUG streambot: {msg}")
+        await interaction.followup.send(msg)
 
 @watch.autocomplete("searchterm")
 async def watch_autocomplete(interaction: discord.Interaction, current: str):
