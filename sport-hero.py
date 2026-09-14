@@ -54,6 +54,17 @@ proc_bun = None
 epg_data = []
 active_stream_session = None
 
+async def _forward_subprocess_output(stream, prefix: str):
+    if stream is None:
+        return
+    while True:
+        line = await stream.readline()
+        if not line:
+            break
+        text = line.decode("utf-8", errors="replace").strip()
+        if text:
+            print(f"[streambot:{prefix}] {text}")
+
 async def start_streambot_process():
     """Start the Node selfbot once and keep it alive for all stream changes."""
     global proc_bun
@@ -74,6 +85,9 @@ async def start_streambot_process():
         stderr=subprocess.PIPE,
     )
 
+    asyncio.create_task(_forward_subprocess_output(proc_bun.stdout, "stdout"))
+    asyncio.create_task(_forward_subprocess_output(proc_bun.stderr, "stderr"))
+
     await asyncio.sleep(2)
     if proc_bun.returncode is not None:
         stdout_data = await proc_bun.stdout.read() if proc_bun.stdout else b""
@@ -93,6 +107,7 @@ async def send_streambot_command(command: dict):
     if proc.stdin is None:
         raise RuntimeError("streambot stdin is unavailable")
     payload = (json.dumps(command, separators=(",", ":"), ensure_ascii=False) + "\n").encode("utf-8")
+    print(f"DEBUG streambot payload: {payload.decode('utf-8', errors='replace').strip()}")
     proc.stdin.write(payload)
     await proc.stdin.drain()
     return proc
