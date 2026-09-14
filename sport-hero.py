@@ -137,23 +137,37 @@ def find_channel(query):
     return None
 
 async def get_current_voice_channel(interaction: discord.Interaction):
-    print(f"DEBUG voice check: user={interaction.user.id} guild={interaction.guild_id} guild_obj={interaction.guild}")
+    guild_id = interaction.guild_id
+    guild = interaction.guild or (bot.get_guild(guild_id) if guild_id else None)
+    print(f"DEBUG voice check: user={interaction.user.id} guild_id={guild_id} guild_obj={guild}")
+    print(f"DEBUG voice check: bot.guilds_has_target={bool(guild_id and any(g.id == guild_id for g in bot.guilds))}")
 
     if interaction.user is not None and getattr(interaction.user, "voice", None) is not None:
-        print(f"DEBUG voice check: interaction.user.voice.channel={interaction.user.voice.channel.id if interaction.user.voice.channel else None}")
-        return interaction.user.voice.channel
+        channel = interaction.user.voice.channel
+        print(f"DEBUG voice check: interaction.user.voice.channel={channel.id if channel else None}")
+        return channel
 
-    guild = interaction.guild
     if guild is None:
-        print("DEBUG voice check: guild is None")
+        print("DEBUG voice check: guild is None; bot is not in the guild or cache is stale")
         return None
 
     member = guild.get_member(interaction.user.id)
     print(f"DEBUG voice check: guild.get_member returned={member}")
+
     if member is None:
         try:
             member = await guild.fetch_member(interaction.user.id)
             print(f"DEBUG voice check: guild.fetch_member returned={member}")
+        except discord.NotFound:
+            print("DEBUG voice check: fetch_member returned NotFound; falling back to guild voice_states cache")
+            voice_state = None
+            if hasattr(guild, "voice_states") and isinstance(guild.voice_states, dict):
+                voice_state = guild.voice_states.get(interaction.user.id)
+            if voice_state and getattr(voice_state, "channel", None) is not None:
+                print(f"DEBUG voice check: guild.voice_states channel={voice_state.channel.id}")
+                return voice_state.channel
+            print("DEBUG voice check: no guild voice state found for user")
+            return None
         except Exception as e:
             print(f"DEBUG voice check: fetch_member failed: {e}")
             return None
@@ -162,13 +176,18 @@ async def get_current_voice_channel(interaction: discord.Interaction):
         print("DEBUG voice check: member is None")
         return None
 
-    print(f"DEBUG voice check: member.voice={member.voice}")
-    if member.voice is None:
+    voice_state = member.voice
+    if voice_state is None and hasattr(guild, "voice_states") and isinstance(guild.voice_states, dict):
+        voice_state = guild.voice_states.get(interaction.user.id)
+
+    print(f"DEBUG voice check: member.voice={voice_state}")
+    if voice_state is None or getattr(voice_state, "channel", None) is None:
         print("DEBUG voice check: member not in voice")
         return None
 
-    print(f"DEBUG voice check: member.voice.channel={member.voice.channel.id if member.voice.channel else None}")
-    return member.voice.channel
+    channel = voice_state.channel
+    print(f"DEBUG voice check: resolved channel={channel.id if channel else None} name={channel.name if channel else None}")
+    return channel
 
 @tree.command(name="watch", description="Watch a live TV channel")
 async def watch(interaction: discord.Interaction, searchterm: str):
