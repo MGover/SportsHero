@@ -26,32 +26,42 @@ pip install python-dotenv
 
 ## Installation
 1. Clone this repo. Run the following in your OS Terminal:
-   
+
    ```
    git clone https://github.com/MGover/SportsHero.git
    ```
-3. Use Bun to install Node dependences:
-   
+
+2. Install the streambot dependencies and build the JavaScript app:
+
    ```
    cd ./streambot
-   ```
-   
-   ```
-   bun install
+   npm install
+   npm run build
    ```
 
-5. Configure Environment Variables
-   - There are 2 .env.example files. One in the project root and another under /streambot/ directory
+3. Configure Environment Variables
+   - There is one root `.env` file and one `/streambot/.env` file
    - See below on how to configure these values
-  
+
+4. Start the Python bot from the project root:
+
+   ```
+   cd ..
+   python sport-hero.py
+   ```
+
 ## Usage
-Run the following in the project root:
+Run the Python bot from the project root:
 
 ```
 python sport-hero.py
 ```
 
-If you get "Logged in as <BotNameHere> then you got everything right so far
+The selfbot stream process is started automatically by the Python app when you run `/watch` or `/watch_channel`.
+
+Important: the selfbot is not meant to be launched as a standalone app for this project. The Python wrapper starts it for you.
+
+If you get "Logged in as <BotNameHere>" then you got everything right so far.
 
 ## Commands
 |Command|Description|

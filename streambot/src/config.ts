@@ -6,6 +6,12 @@ dotenv.config()
 
 const VALID_VIDEO_CODECS = ['VP8', 'H264', 'H265', 'VP9', 'AV1'];
 
+function redactToken(token: string): string {
+    if (!token) return 'MISSING';
+    if (token.length <= 8) return `${token[0]}***${token[token.length - 1]}`;
+    return `${token.slice(0, 4)}...${token.slice(-4)}`;
+}
+
 export default {
     // Selfbot options
     token: process.env.TOKEN || '',

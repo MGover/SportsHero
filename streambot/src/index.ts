@@ -3,13 +3,12 @@ import { Streamer, Utils, prepareStream, playStream } from "@dank074/discord-vid
 import config from "./config.js";
 import fs from 'fs';
 import path from 'path';
+import readline from 'node:readline';
 import logger from './utils/logger.js';
 
-// Create a new instance of Streamer
-const streamer = new Streamer(new Client());
-
-// Declare a controller to abort the stream
-let controller: AbortController;
+const client = new Client();
+const streamer = new Streamer(client);
+let controller: AbortController | undefined;
 
 const streamOpts = {
     width: config.width,
@@ -23,107 +22,33 @@ const streamOpts = {
     h26xPreset: config.h26xPreset
 };
 
-// Create previewCache parent dir if it doesn't exist
-if (!fs.existsSync(path.dirname(config.previewCacheDir))) {
-    fs.mkdirSync(path.dirname(config.previewCacheDir), { recursive: true });
-}
-
-// Create the previewCache dir if it doesn't exist
-if (!fs.existsSync(config.previewCacheDir)) {
-    fs.mkdirSync(config.previewCacheDir);
-}
-
-// Ready event
-streamer.client.on("ready", async () => {
-    if (streamer.client.user) {
-        streamer.client.user?.setActivity(status_idle() as ActivityOptions);
-    }
-});
-
-// Stream status object
 const streamStatus = {
     joined: false,
     joinsucc: false,
     playing: false,
     manualStop: false,
     channelInfo: {
-        guildId: "",
-        channelId: "",
+        guildId: config.guildId || '',
+        channelId: config.videoChannelId || '',
     }
+};
+
+if (!fs.existsSync(path.dirname(config.previewCacheDir))) {
+    fs.mkdirSync(path.dirname(config.previewCacheDir), { recursive: true });
 }
 
-// Function to stop video
-async function stopVideo() {
-    if (!streamStatus.joined) {
-        logger.info("already stopped")
-        return;
-    }
-    try {
-        streamStatus.manualStop = true;
-        
-        controller?.abort();
-
-        streamer.stopStream();
-        streamer.leaveVoice();
-        streamer.client.user?.setActivity(status_idle() as ActivityOptions);
-
-        streamStatus.joined = false;
-        streamStatus.joinsucc = false;
-        streamStatus.playing = false;
-        streamStatus.channelInfo = {
-            guildId: "",
-            channelId: "",
-        };
-
-    } catch (error) {
-        logger.info("Error:" + error)
-    }
+if (!fs.existsSync(config.previewCacheDir)) {
+    fs.mkdirSync(config.previewCacheDir, { recursive: true });
 }
 
-// Function to play video
-async function playVideo(video: string, title?: string, channelId?: string, guildId?: string) {
-    logger.info("Starting video: " + video);
-    logger.info("GuildID: " + guildId + "\nChannelId: " + channelId)
-    // Reset manual stop flag
-    streamStatus.manualStop = false;
+const status_idle = (): ActivityOptions => new CustomStatus(new Client())
+    .setEmoji('📽')
+    .setState('Watching Something!') as unknown as ActivityOptions;
 
-    // Join voice channel
-    await streamer.joinVoice(guildId, channelId)
-    streamStatus.joined = true;
-    streamStatus.playing = true;
-    streamStatus.channelInfo = {
-        guildId: guildId,
-        channelId: channelId
-    }
+const status_watch = (name: string): ActivityOptions => new CustomStatus(new Client())
+    .setEmoji('📽')
+    .setState(`Playing ${name}...`) as unknown as ActivityOptions;
 
-    try {
-        if (title) {
-            streamer.client.user?.setActivity(status_watch(title) as ActivityOptions);
-        }
-
-        // Abort any existing controller
-        controller?.abort();
-        controller = new AbortController();
-
-        const { command, output } = prepareStream(video, streamOpts, controller.signal);
-
-        command.on("error", (err) => {
-            logger.info("An error happened with ffmpeg" + err);
-        });
-
-        await playStream(output, streamer, undefined, controller.signal)
-            .catch(() => controller.abort());
-
-        logger.info("Finished playing video");
-    } catch (error) {
-        logger.info("Error occurred while playing video:" + error);
-        controller?.abort();
-    } finally {
-        await cleanupStreamStatus();
-    }
-}
-
-// Function to cleanup stream status - updated
 async function cleanupStreamStatus() {
     if (streamStatus.manualStop) {
         return;
@@ -133,99 +58,151 @@ async function cleanupStreamStatus() {
         controller?.abort();
         streamer.stopStream();
         streamer.leaveVoice();
+        client.user?.setActivity(status_idle() as ActivityOptions);
 
-        streamer.client.user?.setActivity(status_idle() as ActivityOptions);
-
-        // Reset all status flags
         streamStatus.joined = false;
         streamStatus.joinsucc = false;
         streamStatus.playing = false;
         streamStatus.manualStop = false;
-        streamStatus.channelInfo = {
-            guildId: "",
-            channelId: ""
-        };
+        streamStatus.channelInfo = { guildId: '', channelId: '' };
     } catch (error) {
-        logger.info("Error during cleanup:" + error);
+        logger.info('Error during cleanup: ' + error);
     }
 }
 
-const status_idle = () => {
-    return new CustomStatus(new Client())
-        .setEmoji('📽')
-        .setState('Watching Something!')
+async function stopVideo() {
+    if (!streamStatus.joined) {
+        logger.info('already stopped');
+        return;
+    }
+
+    try {
+        streamStatus.manualStop = true;
+        controller?.abort();
+        streamer.stopStream();
+        streamer.leaveVoice();
+        client.user?.setActivity(status_idle() as ActivityOptions);
+
+        streamStatus.joined = false;
+        streamStatus.joinsucc = false;
+        streamStatus.playing = false;
+        streamStatus.channelInfo = { guildId: '', channelId: '' };
+    } catch (error) {
+        logger.info('Error stopping video: ' + error);
+    }
 }
 
-const status_watch = (name: string) => {
-    return new CustomStatus(new Client())
-        .setEmoji('📽')
-        .setState(`Playing ${name}...`)
+async function playVideo(video: string, title?: string, channelId?: string, guildId?: string) {
+    logger.info('Starting video: ' + video);
+    logger.info(`Selfbot join attempt: guild=${guildId} channel=${channelId} title=${title ?? ''}`);
+
+    streamStatus.manualStop = false;
+
+    try {
+        logger.info('Calling streamer.joinVoice...');
+        await streamer.joinVoice(guildId, channelId);
+        logger.info('joinVoice resolved successfully');
+
+        streamStatus.joined = true;
+        streamStatus.playing = true;
+        streamStatus.channelInfo = { guildId: guildId ?? '', channelId: channelId ?? '' };
+
+        if (title) {
+            client.user?.setActivity(status_watch(title) as ActivityOptions);
+        }
+
+        controller?.abort();
+        controller = new AbortController();
+
+        const { command, output } = prepareStream(video, streamOpts, controller.signal);
+        command.on('error', (err) => {
+            logger.info('An error happened with ffmpeg: ' + err);
+        });
+
+        logger.info('Starting playStream...');
+        await playStream(output, streamer, undefined, controller.signal).catch((err) => {
+            logger.info('playStream catch: ' + err);
+            controller?.abort();
+        });
+
+        logger.info('Finished playing video');
+    } catch (error) {
+        logger.info('Error occurred while playing video: ' + error);
+        logger.info(`Join/play debug: guild=${guildId} channel=${channelId} video=${video}`);
+        controller?.abort();
+    } finally {
+        await cleanupStreamStatus();
+    }
 }
 
-// Handle uncaught exceptions
 process.on('uncaughtException', (error) => {
     if (!(error instanceof Error && error.message.includes('SIGTERM'))) {
-        logger.info('Uncaught Exception:' + error);
-        return
+        logger.info('Uncaught Exception: ' + error);
+        return;
     }
 });
 
-// Login to Discord
 if (!config.token) {
-    logger.info("Selfbot token missing. Set streambot/.env TOKEN=... before starting the streambot.");
+    logger.info('Selfbot token missing. Set streambot/.env TOKEN=... before starting the streambot.');
     process.exit(1);
 }
 
-streamer.client.on("error", (error) => {
-    logger.info("Discord client error: " + error);
+logger.info(`Selfbot token loaded: ${config.token.slice(0, 4)}...${config.token.slice(-4)} (length=${config.token.length})`);
+
+client.on('ready', () => {
+    logger.info(`Selfbot ready: ${client.user?.tag ?? 'unknown user'}`);
+    client.user?.setActivity(status_idle() as ActivityOptions);
 });
 
-streamer.client.on("disconnect", (event) => {
-    logger.info("Discord client disconnected: " + JSON.stringify(event));
+client.on('error', (error) => {
+    logger.info('Discord client error: ' + error);
 });
 
-streamer.client.on("ready", () => {
-    logger.info(`Selfbot ready: ${streamer.client.user?.tag ?? "unknown user"}`);
+client.on('disconnect', (event) => {
+    logger.info('Discord client disconnected: ' + JSON.stringify(event));
 });
 
-streamer.client.login(config.token).catch((error) => {
-    logger.info("Selfbot login failed: " + error);
+client.login(config.token).catch((error) => {
+    logger.info('Selfbot login failed: ' + error);
     process.exit(1);
 });
 
-// start.ts
-const readline = require('readline');
-
-
 const rl = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout
+    input: process.stdin,
+    output: process.stdout
 });
 
-logger.info("Type something! (type 'exit' to quit)");
+logger.info('Type something! (type \'exit\' to quit)');
 
-// handle input from console
 rl.on('line', (input: string) => {
     logger.info(`Input recieved: ${input}`);
-    const firstFour = input.substring(0, 4);
-    switch (firstFour) {
-      case 'http':
-        const [link, channelId, guildId, ...rest] = input.trim().split(" ");
-        const title = rest.join(" ");
-        logger.info(`Link: ${link}\nTitle: ${title}\nChannelID: ${channelId}\nGuildID: ${guildId}`);
-        logger.info("Attempting to play video");
-        playVideo(link, title, channelId, guildId);
-        break;
-      case 'stop':
-        logger.info(`Leaving and stopping`);
-        stopVideo()
-        break;
-      case 'exit':
-        logger.info("👋 Goodbye!");
-        rl.close();
-        break;
-      default:
-        logger.info(`🤔 You said: ${input}`);
+    const prefix = input.substring(0, 4);
+
+    switch (prefix) {
+        case 'http': {
+            const [link, channelId, guildId, ...rest] = input.trim().split(' ');
+            const title = rest.join(' ');
+            logger.info(`Link: ${link}\nTitle: ${title}\nChannelID: ${channelId}\nGuildID: ${guildId}`);
+            logger.info('Attempting to play video');
+            playVideo(link, title, channelId, guildId).catch((err) => {
+                logger.info(`playVideo promise rejected: ${err}`);
+            });
+            break;
+        }
+        case 'stop': {
+            logger.info('Leaving and stopping');
+            stopVideo().catch((err) => {
+                logger.info(`stopVideo promise rejected: ${err}`);
+            });
+            break;
+        }
+        case 'exit': {
+            logger.info('👋 Goodbye!');
+            rl.close();
+            break;
+        }
+        default:
+            logger.info(`🤔 You said: ${input}`);
     }
-  });
+});  });
 
