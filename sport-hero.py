@@ -106,6 +106,13 @@ async def stop_current_stream():
         await send_streambot_command({"cmd": "stop", "session_id": active_stream_session})
     active_stream_session = None
 
+async def leave_current_stream():
+    global active_stream_session, proc_bun
+    if proc_bun is not None and proc_bun.returncode is None and proc_bun.stdin:
+        session_id = active_stream_session or str(uuid.uuid4())
+        await send_streambot_command({"cmd": "leave", "session_id": session_id})
+    active_stream_session = None
+
 async def fetch_epg():
     """Fetch and populate the global `epg_data` list with (title, channel_id) tuples."""
     global epg_url, headers, epg_data
@@ -333,7 +340,17 @@ async def stop(interaction: discord.Interaction):
         print(f"Error sending stop to streambot: {e}")
     finally:
         active_stream_session = None
-        proc_bun = proc_bun
+
+@tree.command(name="leave", description="leave the current voice channel and stop the stream")
+async def leave(interaction: discord.Interaction):
+    await interaction.response.send_message("Leaving the current voice channel and stopping the stream.")
+    global proc_bun, active_stream_session
+    try:
+        await leave_current_stream()
+    except Exception as e:
+        print(f"Error issuing leave to streambot: {e}")
+    finally:
+        active_stream_session = None
 
 @tree.command(name="watch_channel", description="Choose from channels")
 async def watch_channel(interaction: discord.Interaction, channel_id: str):

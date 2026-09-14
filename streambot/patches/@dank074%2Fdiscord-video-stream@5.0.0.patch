@@ -12,8 +12,8 @@ index 94c5ca705b5021034467508362064361360d38fc..e64d95abb7294764c3d71ddcecb7f709
  
      // command creation
      const command = ffmpeg(input)
--        .addOption('-loglevel', '0')
-+        .addOption('-loglevel', '0', '-re', '-i', '-fflag', '+nobuffer', '-flag', '+global_header', '-bsf:a aac_adtstoasc')
+-        .addOption('-loglevel', '0', '-re', '-i', '-fflag', '+nobuffer', '-flag', '+global_header', '-bsf:a aac_adtstoasc')
++        .addOption('-loglevel', '0')
  
      // input options
      const { hardwareAcceleratedDecoding, minimizeLatency, customHeaders } = mergedOptions;

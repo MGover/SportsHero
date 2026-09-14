@@ -139,8 +139,20 @@ async function playVideo(sessionId: string, video: string, title?: string, chann
         controller = new AbortController();
 
         const { command, output } = prepareStream(video, streamOpts, controller.signal);
+        command.on('start', (commandLine) => {
+            logger.info('FFmpeg started: ' + commandLine);
+        });
+        command.on('stderr', (data) => {
+            const text = data.toString().trim();
+            if (text) {
+                logger.info('FFmpeg stderr: ' + text);
+            }
+        });
         command.on('error', (err) => {
             logger.info('An error happened with ffmpeg: ' + err);
+        });
+        command.on('end', () => {
+            logger.info('FFmpeg ended normally for session ' + sessionId);
         });
 
         logger.info('Starting playStream...');
@@ -237,8 +249,8 @@ rl.on('line', async (input: string) => {
             return;
         }
 
-        if (cmd === 'stop') {
-            logger.info(`Stopping stream for session=${sessionId || '<none>'}`);
+        if (cmd === 'stop' || cmd === 'leave') {
+            logger.info(`${cmd === 'leave' ? 'Leaving' : 'Stopping'} stream for session=${sessionId || '<none>'}`);
             await stopVideo(sessionId).catch((err) => {
                 logger.info(`stopVideo promise rejected: ${err}`);
             });
@@ -265,8 +277,8 @@ rl.on('line', async (input: string) => {
             return;
         }
 
-        if (trimmed === 'stop') {
-            logger.info('Legacy stop command received');
+        if (trimmed === 'stop' || trimmed === 'leave') {
+            logger.info(`Legacy ${trimmed} command received`);
             await stopVideo().catch((err) => {
                 logger.info(`legacy stopVideo promise rejected: ${err}`);
             });

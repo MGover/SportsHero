@@ -56,3 +56,7 @@ def build_play_command(session_id: str, video_url: str, channel_id: str, guild_i
 
 def build_stop_command(session_id: str) -> StreamCommand:
     return StreamCommand(cmd="stop", session_id=session_id)
+
+
+def build_leave_command(session_id: str) -> StreamCommand:
+    return StreamCommand(cmd="leave", session_id=session_id)

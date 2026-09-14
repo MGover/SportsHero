@@ -32,6 +32,13 @@ class StreamControlTests(unittest.TestCase):
         self.assertIn('"cmd":"stop"', command.to_json_line())
         self.assertIn('"session_id":"sess-456"', command.to_json_line())
 
+    def test_leave_command_is_explicit_and_session_scoped(self):
+        command = build_leave_command(session_id="sess-789")
+        self.assertEqual(command.cmd, "leave")
+        self.assertEqual(command.session_id, "sess-789")
+        self.assertIn('"cmd":"leave"', command.to_json_line())
+        self.assertIn('"session_id":"sess-789"', command.to_json_line())
+
 
 if __name__ == "__main__":
     unittest.main()
