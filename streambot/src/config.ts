@@ -15,6 +15,11 @@ function redactToken(token: string): string {
 export default {
     // Selfbot options
     token: process.env.TOKEN || '',
+    prefix: process.env.PREFIX || '$',
+    guildId: process.env.GUILD_ID || '',
+    cmdChannelId: process.env.COMMAND_CHANNEL_ID || '',
+    videoChannelId: process.env.VIDEO_CHANNEL_ID || '',
+    adminIds: parseAdminIds(process.env.ADMIN_IDS),
 
     // General options
     videosDir: process.env.VIDEOS_DIR ? process.env.VIDEOS_DIR : './videos',
@@ -30,6 +35,17 @@ export default {
     hardwareAcceleratedDecoding: process.env.STREAM_HARDWARE_ACCELERATION ? parseBoolean(process.env.STREAM_HARDWARE_ACCELERATION) : false,
     h26xPreset: process.env.STREAM_H26X_PRESET ? parsePreset(process.env.STREAM_H26X_PRESET) : 'ultrafast',
     videoCodec: process.env.STREAM_VIDEO_CODEC ? parseVideoCodec(process.env.STREAM_VIDEO_CODEC) : 'H264',
+}
+
+function parseAdminIds(value: string | undefined): string[] {
+    if (!value) return [];
+    try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(parsed)) return parsed.map(String);
+    } catch {
+        // fall through to comma split
+    }
+    return value.split(',').map(v => v.trim()).filter(Boolean);
 }
 
 function parseVideoCodec(value: string): "VP8" | "H264" | "H265" {
