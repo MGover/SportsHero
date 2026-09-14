@@ -136,9 +136,27 @@ def find_channel(query):
             return channel_id
     return None
 
+async def get_current_voice_channel(interaction: discord.Interaction):
+    guild = interaction.guild
+    if guild is None:
+        return None
+
+    member = guild.get_member(interaction.user.id)
+    if member is None:
+        try:
+            member = await guild.fetch_member(interaction.user.id)
+        except Exception:
+            return None
+
+    if member is None or member.voice is None:
+        return None
+
+    return member.voice.channel
+
 @tree.command(name="watch", description="Watch a live TV channel")
 async def watch(interaction: discord.Interaction, searchterm: str):
-    if not interaction.user.voice:
+    voice_channel = await get_current_voice_channel(interaction)
+    if voice_channel is None:
         await interaction.response.send_message("You need to be in a voice channel to use this command.", ephemeral=True)
         return
 
@@ -174,7 +192,7 @@ async def watch(interaction: discord.Interaction, searchterm: str):
         return
     
     guild = interaction.guild_id
-    channel = interaction.user.voice.channel
+    channel = voice_channel
     global proc_bun
     if proc_bun is not None:
         print("killing old streambot process")
@@ -225,7 +243,8 @@ async def stop(interaction: discord.Interaction):
 
 @tree.command(name="watch_channel", description="Choose from channels")
 async def watch_channel(interaction: discord.Interaction, channel_id: str):
-    if not interaction.user.voice:
+    voice_channel = await get_current_voice_channel(interaction)
+    if voice_channel is None:
         await interaction.response.send_message("You need to be in a voice channel to use this command.", ephemeral=True)
         return
 
@@ -256,7 +275,7 @@ async def watch_channel(interaction: discord.Interaction, channel_id: str):
         return
     
     guild = interaction.guild_id
-    channel = interaction.user.voice.channel
+    channel = voice_channel
     global proc_bun
     if proc_bun is not None:
         print("killing old streambot process")
