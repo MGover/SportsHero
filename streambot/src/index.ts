@@ -1,5 +1,5 @@
 import { Client, CustomStatus, ActivityOptions } from "discord.js-selfbot-v13";
-import { Streamer, Utils, prepareStream, playStream } from "@dank074/discord-video-stream";
+import { Encoders, Streamer, Utils, prepareStream, playStream } from "@dank074/discord-video-stream";
 import config from "./config.js";
 import fs from 'fs';
 import path from 'path';
@@ -8,9 +8,41 @@ import logger from './utils/logger.js';
 
 const client = new Client();
 const streamer = new Streamer(client);
+const originalSendOpcode = streamer.sendOpcode.bind(streamer);
+streamer.sendOpcode = ((code: number, data: unknown) => {
+    if (code === 4 && data && typeof data === 'object') {
+        const payload = data as Record<string, unknown>;
+        const hasVoiceStatePayload = Object.prototype.hasOwnProperty.call(payload, 'guild_id') || Object.prototype.hasOwnProperty.call(payload, 'channel_id');
+        if (hasVoiceStatePayload) {
+            const isVideoPayload = payload.self_video === true || payload.self_video === 'true' || payload.self_stream === true || payload.self_stream === 'true';
+            payload.self_video = payload.self_video === undefined ? true : payload.self_video;
+            payload.self_stream = payload.self_stream === undefined ? isVideoPayload : payload.self_stream;
+            payload.flags = isVideoPayload ? 2 : 0;
+        }
+    }
+    return originalSendOpcode(code, data);
+}) as typeof streamer.sendOpcode;
+
+client.on('raw', (packet: any) => {
+    if (!packet || typeof packet !== 'object' || !packet.t) {
+        return;
+    }
+    if (packet.t === 'VOICE_STATE_UPDATE' || packet.t === 'VOICE_SERVER_UPDATE' || packet.t === 'STREAM_CREATE' || packet.t === 'STREAM_SERVER_UPDATE') {
+        const eventData = { ...packet.d };
+        if (packet.t === 'VOICE_SERVER_UPDATE' && eventData.token) {
+            eventData.token = '[redacted]';
+        }
+        logger.info(`Discord raw gateway: ${packet.t} ${JSON.stringify(eventData)}`);
+    }
+});
+
 let controller: AbortController | undefined;
 
 const streamOpts = {
+    encoder: Encoders.software({
+        x264: { preset: config.h26xPreset, tune: 'zerolatency' },
+        x265: { preset: config.h26xPreset, tune: 'zerolatency' },
+    }),
     width: config.width,
     height: config.height,
     frameRate: config.fps,
@@ -18,8 +50,14 @@ const streamOpts = {
     bitrateVideoMax: config.maxBitrateKbps,
     videoCodec: Utils.normalizeVideoCodec(config.videoCodec),
     hardwareAcceleratedDecoding: config.hardwareAcceleratedDecoding,
-    minimizeLatency: false,
-    h26xPreset: config.h26xPreset
+    minimizeLatency: true,
+    customInputOptions: [
+        '-re',
+        '-fflags', 'nobuffer',
+    ],
+    customFfmpegFlags: [
+        '-flags', '+global_header',
+    ]
 };
 
 const streamStatus = {
@@ -71,6 +109,8 @@ async function joinVoiceWithDiagnostics(guildId?: string, channelId?: string) {
     logger.info(`joinVoice diagnostics: guildVoiceChannelExists=${!!guild?.channels.cache.get(channelId ?? '')}`);
     logger.info(`joinVoice diagnostics: clientChannelCacheHas=${client.channels.cache.has(channelId ?? '')}`);
 
+    const joinTimeoutMs = Number(process.env.STREAM_JOIN_TIMEOUT_MS ?? 60000);
+
     return Promise.race([
         (async () => {
             logger.info('joinVoice diagnostics: starting native joinVoice call');
@@ -80,8 +120,7 @@ async function joinVoiceWithDiagnostics(guildId?: string, channelId?: string) {
             return result;
         })(),
         new Promise((_, reject) => {
-            const timeoutMs = 20000;
-            setTimeout(() => reject(new Error(`joinVoice timed out after ${timeoutMs}ms for guild=${guildId} channel=${channelId}`)), timeoutMs);
+            setTimeout(() => reject(new Error(`joinVoice timed out after ${joinTimeoutMs}ms for guild=${guildId} channel=${channelId}`)), joinTimeoutMs);
         })
     ]) as Promise<void>;
 }
@@ -186,7 +225,7 @@ async function playVideo(sessionId: string, video: string, title?: string, chann
 
         logger.info(`stream start: invoking playStream for session=${sessionId}`);
         try {
-            await playStream(output, streamer, undefined, controller.signal);
+            await playStream(output, streamer, { type: 'go-live' }, controller.signal);
             logger.info(`playStream resolved without raising an exception for session ${sessionId}`);
         } catch (err) {
             logger.info('playStream catch: ' + err);

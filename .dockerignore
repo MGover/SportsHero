@@ -1,6 +1,8 @@
 __pycache__/
 node_modules/
+streambot/node_modules/
 dist/
+streambot/dist/
 logs/
 *.pyc
 .env

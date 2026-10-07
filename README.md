@@ -66,8 +66,8 @@ If you get "Logged in as <BotNameHere>" then you got everything right so far.
 ## Commands
 |Command|Description|
 |---------|---------|
-|/watch| An interactive slash command that will show you currently active programmes matching with what you type|
-|/watch_channel| An interactive slash command that will show you available Channels to stream from|
+|/watch|Search active programmes by title, then fall back to named IPTV streams such as 24/7 shows or local stations|
+|/watch_channel|Search IPTV channel names and regions, for example `CBS Sacramento`|
 |/stop| Tells the bot to stop streaming|
 
 *Special Notes About Commands*: 
@@ -90,7 +90,7 @@ DISCORD_BOT_TOKEN is the token from your OFFICIAL discord bot. This bot needs [a
 
 M3U_URL is the URL provided to you by your IPTV subscription service. It NEEDS to be formatted with username and password in the link like the example above
 
-EPG_URL is the link to your Electronic Programme Guide. This is how the bot knows what is currently playing on TV. There are publicly available ones but no EPG is perfect. Try to use the one your IPTV service provides you. 
+EPG_URL is an optional Electronic Programme Guide URL. The bot tries it first and falls back to the IPTV provider's XMLTV feed if it is unavailable or invalid. EPG coverage varies; named IPTV streams remain searchable even when they have no EPG mapping.
 
 TODO: Allow users to use a local epg.xml 
 

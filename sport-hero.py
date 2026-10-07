@@ -13,6 +13,7 @@ import json
 import uuid
 from pathlib import Path
 from dotenv import load_dotenv # type: ignore
+from channel_search import rank_catalog_channels, rank_search_matches
 
 # Load environment variables
 env_path = Path(__file__).resolve().parent / ".env"
@@ -43,7 +44,11 @@ url = match.group(1)
 username = match.group(2)
 password = match.group(3)
 stream_url = url + "/player_api.php"
-epg_url = f"{url}/xmltv.php?username={username}&password={password}"
+provider_epg_url = f"{url}/xmltv.php?username={username}&password={password}"
+epg_urls = [EPG_URL.strip()] if EPG_URL and EPG_URL.strip() else []
+if provider_epg_url not in epg_urls:
+    epg_urls.append(provider_epg_url)
+epg_url = epg_urls[0]
 params = {'username': username, 'password': password, 'action': "get_live_streams", 'catergory_id': ''}
 CUSTOM_USER_AGENT = (
     "Connection: Keep-Alive User-Agent: okhttp/5.0.0-alpha.2 "
@@ -52,9 +57,12 @@ CUSTOM_USER_AGENT = (
 headers = {'User-Agent': CUSTOM_USER_AGENT}
 proc_bun = None
 epg_data = []
+m3u_data = []
+m3u_fetched_at = 0.0
 active_stream_session = None
+M3U_CACHE_SECONDS = 300
 
-async def _forward_subprocess_output(stream, prefix: str):
+async def _forward_subprocess_output(stream, prefix: str, ready_event=None):
     if stream is None:
         return
     while True:
@@ -64,6 +72,8 @@ async def _forward_subprocess_output(stream, prefix: str):
         text = line.decode("utf-8", errors="replace").strip()
         if text:
             print(f"[streambot:{prefix}] {text}")
+            if prefix == "stdout" and ready_event is not None and "Selfbot ready:" in text:
+                ready_event.set()
 
 async def start_streambot_process():
     """Start the Node selfbot once and keep it alive for all stream changes."""
@@ -76,6 +86,7 @@ async def start_streambot_process():
     if not node_bin:
         raise RuntimeError("node not found in PATH; streambot cannot start")
 
+    ready_event = asyncio.Event()
     proc_bun = await asyncio.create_subprocess_exec(
         node_bin,
         "dist/index.js",
@@ -85,20 +96,31 @@ async def start_streambot_process():
         stderr=subprocess.PIPE,
     )
 
-    asyncio.create_task(_forward_subprocess_output(proc_bun.stdout, "stdout"))
+    asyncio.create_task(_forward_subprocess_output(proc_bun.stdout, "stdout", ready_event))
     asyncio.create_task(_forward_subprocess_output(proc_bun.stderr, "stderr"))
 
-    await asyncio.sleep(2)
-    if proc_bun.returncode is not None:
-        stdout_data = await proc_bun.stdout.read() if proc_bun.stdout else b""
-        stderr_data = await proc_bun.stderr.read() if proc_bun.stderr else b""
-        stdout_text = stdout_data.decode("utf-8", errors="replace").strip()
-        stderr_text = stderr_data.decode("utf-8", errors="replace").strip()
-        detail_parts = [part for part in [stdout_text, stderr_text] if part]
-        detail = "\n".join(detail_parts) if detail_parts else "streambot process exited without output"
-        raise RuntimeError(f"streambot failed to start: {detail}")
+    ready_task = asyncio.create_task(ready_event.wait())
+    exit_task = asyncio.create_task(proc_bun.wait())
+    done, pending = await asyncio.wait(
+        (ready_task, exit_task),
+        timeout=30,
+        return_when=asyncio.FIRST_COMPLETED,
+    )
+    for task in pending:
+        task.cancel()
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
 
-    print("DEBUG streambot: started successfully and is still running")
+    if ready_task not in done:
+        if proc_bun.returncode is None:
+            proc_bun.terminate()
+            await proc_bun.wait()
+        proc_bun = None
+        if exit_task in done:
+            raise RuntimeError("streambot exited before Discord login completed")
+        raise RuntimeError("streambot did not become ready within 30 seconds")
+
+    print("DEBUG streambot: Discord login completed and process is ready")
     return proc_bun
 
 async def send_streambot_command(command: dict):
@@ -130,55 +152,57 @@ async def leave_current_stream():
 
 async def fetch_epg(max_retries=4, retry_delay=5):
     """Fetch and populate the global `epg_data` list with (title, channel_id) tuples."""
-    global epg_url, headers, epg_data
+    global epg_url, epg_data
 
-    for attempt in range(1, max_retries + 1):
-        try:
-            resp = await asyncio.to_thread(requests.post, epg_url, headers=headers, timeout=10)
-        except Exception as e:
-            if attempt == max_retries:
-                print(f"Error fetching EPG after {max_retries} attempts: {e}")
-                return
-            print(f"EPG fetch attempt {attempt}/{max_retries} failed: {e}; retrying in {retry_delay}s")
-            await asyncio.sleep(retry_delay)
-            continue
-
-        if resp.status_code != 200:
-            if attempt == max_retries:
-                print(f"Error fetching EPG after {max_retries} attempts: {resp.status_code}")
-                return
-            print(f"EPG fetch attempt {attempt}/{max_retries} failed with status {resp.status_code}; retrying in {retry_delay}s")
-            await asyncio.sleep(retry_delay)
-            continue
-
-        try:
-            xml_content = resp.content
-            root = ET.fromstring(xml_content)
-        except Exception as e:
-            if attempt == max_retries:
-                print(f"Error parsing EPG XML after {max_retries} attempts: {e}")
-                return
-            print(f"EPG XML parse attempt {attempt}/{max_retries} failed: {e}; retrying in {retry_delay}s")
-            await asyncio.sleep(retry_delay)
-            continue
-
-        now = datetime.utcnow()
-        epg_data.clear()
-        for prog in root.findall('.//programme'):
-            if prog is None:
+    for source_index, source_url in enumerate(epg_urls):
+        for attempt in range(1, max_retries + 1):
+            try:
+                resp = await asyncio.to_thread(requests.get, source_url, headers=headers, timeout=30)
+            except Exception as error:
+                if attempt == max_retries:
+                    print(f"EPG source {source_index + 1} failed: {type(error).__name__}")
+                    break
+                await asyncio.sleep(retry_delay)
                 continue
-            title_el = prog.find('title')
-            if title_el is None or title_el.text is None:
-                continue
-            title = title_el.text.strip()
-            channel = prog.get('channel')
-            start_time = parse_epg_time(prog.get('start'))
-            stop_time = parse_epg_time(prog.get('stop'))
-            if start_time <= now <= stop_time:
-                epg_data.append((title, channel))
-        return
 
-    print("EPG fetch exited without success")
+            if resp.status_code != 200:
+                if resp.status_code in (400, 401, 403, 404, 410):
+                    print(f"EPG source {source_index + 1} rejected the request with status {resp.status_code}; trying fallback")
+                    break
+                if attempt == max_retries:
+                    print(f"EPG source {source_index + 1} failed with status {resp.status_code}")
+                    break
+                await asyncio.sleep(retry_delay)
+                continue
+
+            try:
+                root = ET.fromstring(resp.content)
+                if root.tag.rsplit("}", 1)[-1].lower() != "tv":
+                    raise ValueError("document is not XMLTV")
+            except Exception as error:
+                print(f"EPG source {source_index + 1} returned invalid XMLTV: {type(error).__name__}")
+                break
+
+            now = datetime.utcnow()
+            matched_programmes = []
+            for program in root.findall('.//programme'):
+                title_element = program.find('title')
+                if title_element is None or not title_element.text:
+                    continue
+                if parse_epg_time(program.get('start')) <= now <= parse_epg_time(program.get('stop')):
+                    channel_id = program.get('channel')
+                    if channel_id:
+                        matched_programmes.append((title_element.text.strip(), channel_id))
+
+            if matched_programmes:
+                epg_data[:] = matched_programmes
+                epg_url = source_url
+                print(f"EPG loaded from source {source_index + 1}: {len(epg_data)} current programmes")
+                return
+            print(f"EPG source {source_index + 1} had no current programmes; trying fallback")
+            break
+
+    print("No usable XMLTV source found; channel-name search remains available")
 
 def parse_epg_time(epg_time):
     """Parses EPG time formats like 'YYYYMMDDHHMMSS', 'YYYYMMDDHHMMSS+ZZZZ' or with a space before TZ.
@@ -209,9 +233,12 @@ def parse_epg_time(epg_time):
     return dt
 
 async def fetch_m3u():
-    global stream_url
+    global stream_url, m3u_data, m3u_fetched_at
     global params
     global headers
+    if m3u_data and time.monotonic() - m3u_fetched_at < M3U_CACHE_SECONDS:
+        return m3u_data
+
     try:
         resp = await asyncio.to_thread(requests.post, stream_url, data=params, headers=headers, timeout=10)
     except Exception as e:
@@ -220,19 +247,61 @@ async def fetch_m3u():
 
     if resp.status_code == 200:
         try:
-            return resp.json()
+            records = resp.json()
+            if isinstance(records, list):
+                m3u_data = records
+                m3u_fetched_at = time.monotonic()
+                return m3u_data
         except Exception:
-            return []
+            pass
+        return m3u_data
     else:
         print(f"Error fetching M3U: {resp.status_code}")
-        return []
+        return m3u_data
 
-def find_channel(query):
-    for title, channel_id in epg_data:
-        if channel_id is None:
-            continue
-        if query.lower() in title.lower():
-            return channel_id
+def build_stream_url(record):
+    stream_id = record.get("stream_id")
+    stream_type = record.get("stream_type") or "live"
+    extension = record.get("container_extension") or "m3u8"
+    if not stream_id:
+        return None
+    return f"{url}/{stream_type}/{username}/{password}/{stream_id}.{extension}"
+
+def find_catalog_channel(query, channels):
+    query = (query or "").strip()
+    if query.startswith("stream:"):
+        query = query.partition(":")[2]
+
+    by_id = next((record for record in channels if str(record.get("stream_id")) == query), None)
+    if by_id is not None:
+        return by_id
+
+    matches = rank_catalog_channels(
+        query,
+        (record for record in channels if record.get("name") and record.get("stream_id")),
+        limit=1,
+        minimum_score=0.62,
+    )
+    return matches[0][1] if matches else None
+
+def find_program_stream(query, channels):
+    epg_matches = rank_search_matches(
+        query,
+        epg_data,
+        lambda programme: programme[0],
+        limit=10,
+        minimum_score=0.58,
+    )
+    channels_by_epg_id = {}
+    for record in channels:
+        epg_id = str(record.get("epg_channel_id") or "").strip()
+        if epg_id:
+            channels_by_epg_id.setdefault(epg_id, []).append(record)
+
+    for _, (title, epg_id) in epg_matches:
+        matching_channels = channels_by_epg_id.get(str(epg_id), [])
+        if matching_channels:
+            return title, matching_channels[0]
     return None
 
 async def get_current_voice_channel(interaction: discord.Interaction):
@@ -302,32 +371,32 @@ async def watch(interaction: discord.Interaction, searchterm: str):
     global username
     global password
     global active_stream_session
-    container_extension = "m3u8"
     await interaction.response.defer()
 
-    channel_id = find_channel(searchterm)
-    if not channel_id:
-        await interaction.followup.send("No matching channel found.")
-        return
-
     m3u_content = await fetch_m3u()
-    channel_url = None
+    selected_program = None
+    if searchterm.startswith("stream:"):
+        selected_channel = find_catalog_channel(searchterm, m3u_content)
+        if selected_channel:
+            selected_program = (selected_channel.get("name") or searchterm, selected_channel)
+    else:
+        selected_program = find_program_stream(searchterm, m3u_content)
+        if selected_program is None:
+            selected_channel = find_catalog_channel(searchterm, m3u_content)
+            if selected_channel:
+                selected_program = (selected_channel.get("name") or searchterm, selected_channel)
 
-    for line in m3u_content:
-        try:
-            if str(line.get("epg_channel_id")) == str(channel_id):
-                container_extension = line.get("container_extension", "m3u8")
-                stream_id = line.get("stream_id")
-                stream_type = line.get("stream_type")
-                channel_url = f"{url}/{stream_type}/{username}/{password}/{stream_id}.{container_extension}"
-                break
-        except Exception:
-            continue
-
-    print(channel_url)
-    if not channel_url:
-        await interaction.followup.send("Channel stream not found.")
+    if selected_program is None:
+        await interaction.followup.send("No matching live programme or IPTV channel found. Try `/watch_channel` to search channel names.")
         return
+
+    matched_title, matched_channel = selected_program
+    channel_url = build_stream_url(matched_channel)
+    if not channel_url:
+        await interaction.followup.send("The matching IPTV entry has no stream URL.")
+        return
+
+    print(f"DEBUG watch match: query={searchterm!r} title={matched_title!r} channel={matched_channel.get('name', '')!r}")
 
     guild = interaction.guild_id
     channel = voice_channel
@@ -346,7 +415,7 @@ async def watch(interaction: discord.Interaction, searchterm: str):
         await asyncio.sleep(0.75)
 
     active_stream_session = session_id
-    await interaction.followup.send(f"Streaming **{searchterm}** in the voice channel!")
+    await interaction.followup.send(f"Streaming **{matched_title}** in the voice channel!")
     try:
         await send_streambot_command({
             "cmd": "play",
@@ -354,7 +423,7 @@ async def watch(interaction: discord.Interaction, searchterm: str):
             "video_url": channel_url,
             "channel_id": str(channel.id),
             "guild_id": str(guild),
-            "title": searchterm,
+            "title": matched_title,
         })
     except Exception as e:
         stderr_data = await proc_bun.stderr.read() if proc_bun and proc_bun.stderr else b""
@@ -388,9 +457,9 @@ async def leave(interaction: discord.Interaction):
     finally:
         active_stream_session = None
 
-@tree.command(name="watch_channel", description="Choose from channels")
-async def watch_channel(interaction: discord.Interaction, channel_id: str):
-    print(f"DEBUG watch_channel command: user={interaction.user.id} guild={interaction.guild_id} channel_id={channel_id}")
+@tree.command(name="watch_channel", description="Search IPTV channels by name or region")
+async def watch_channel(interaction: discord.Interaction, searchterm: str):
+    print(f"DEBUG watch_channel command: user={interaction.user.id} guild={interaction.guild_id} searchterm={searchterm}")
     voice_channel = await get_current_voice_channel(interaction)
     if voice_channel is None:
         print("DEBUG watch_channel command: no voice channel found for user")
@@ -402,26 +471,13 @@ async def watch_channel(interaction: discord.Interaction, channel_id: str):
     global username
     global password
     global active_stream_session
-    container_extension = "m3u8"
     await interaction.response.defer()
 
     m3u_content = await fetch_m3u()
-    channel_url = None
-
-    for line in m3u_content:
-        try:
-            if str(line.get("epg_channel_id")) == str(channel_id):
-                container_extension = line.get("container_extension", "m3u8")
-                stream_id = line.get("stream_id")
-                stream_type = line.get("stream_type")
-                channel_url = f"{url}/{stream_type}/{username}/{password}/{stream_id}.{container_extension}"
-                break
-        except Exception:
-            continue
-
-    print(channel_url)
+    matched_channel = find_catalog_channel(searchterm, m3u_content)
+    channel_url = build_stream_url(matched_channel) if matched_channel else None
     if not channel_url:
-        await interaction.followup.send("Channel stream not found.")
+        await interaction.followup.send("No matching IPTV channel found. Try a network name and city, such as `CBS Sacramento`.")
         return
 
     guild = interaction.guild_id
@@ -441,7 +497,8 @@ async def watch_channel(interaction: discord.Interaction, channel_id: str):
         await asyncio.sleep(0.75)
 
     active_stream_session = session_id
-    await interaction.followup.send(f"Streaming **{channel_id}** in the voice channel!")
+    channel_name = matched_channel.get("name") or searchterm
+    await interaction.followup.send(f"Streaming **{channel_name}** in the voice channel!")
     try:
         await send_streambot_command({
             "cmd": "play",
@@ -449,7 +506,7 @@ async def watch_channel(interaction: discord.Interaction, channel_id: str):
             "video_url": channel_url,
             "channel_id": str(channel.id),
             "guild_id": str(guild),
-            "title": channel_id,
+            "title": channel_name,
         })
     except Exception as e:
         stderr_data = await proc_bun.stderr.read() if proc_bun and proc_bun.stderr else b""
@@ -466,18 +523,52 @@ async def watch_autocomplete(interaction: discord.Interaction, current: str):
     current = (current or "").strip()
     if not current:
         return []
-    return [app_commands.Choice(name=title, value=title) for title, channel in epg_data if title and current.lower() in title.lower()][:25]
+    choices = []
+    seen_values = set()
 
-@watch_channel.autocomplete("channel_id")
+    for _, (title, _) in rank_search_matches(current, epg_data, lambda programme: programme[0], limit=25, minimum_score=0.42):
+        if title not in seen_values:
+            choices.append(app_commands.Choice(name=title[:100], value=title[:100]))
+            seen_values.add(title)
+        if len(choices) >= 25:
+            return choices
+
+    channels = await fetch_m3u()
+    for _, record in rank_catalog_channels(
+        current,
+        (item for item in channels if item.get("name") and item.get("stream_id")),
+        limit=25,
+        minimum_score=0.48,
+    ):
+        stream_id = str(record.get("stream_id"))
+        value = f"stream:{stream_id}"
+        if value in seen_values:
+            continue
+        choices.append(app_commands.Choice(name=f"Channel: {record['name']}"[:100], value=value))
+        seen_values.add(value)
+        if len(choices) >= 25:
+            break
+    return choices
+
+@watch_channel.autocomplete("searchterm")
 async def watch_channel_autocomplete(interaction: discord.Interaction, current: str):
     current = (current or "").strip()
     if not current:
         return []
-    return [app_commands.Choice(name=channel, value=channel) for title, channel in epg_data if channel and current.lower() in str(channel).lower()][:25]
+    channels = await fetch_m3u()
+    choices = []
+    for _, record in rank_catalog_channels(
+        current,
+        (item for item in channels if item.get("name") and item.get("stream_id")),
+        limit=25,
+        minimum_score=0.42,
+    ):
+        choices.append(app_commands.Choice(name=str(record["name"])[:100], value=str(record["stream_id"])))
+    return choices
 
 @bot.event
 async def on_ready():
-    await fetch_epg()
+    await asyncio.gather(fetch_epg(), fetch_m3u())
     await tree.sync()
     print(f'Logged in as {bot.user}')
 

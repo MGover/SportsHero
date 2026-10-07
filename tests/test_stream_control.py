@@ -1,9 +1,46 @@
 import unittest
 
 from stream_control import StreamCommand, build_play_command, build_stop_command
+from channel_search import rank_catalog_channels, rank_search_matches
 
 
 class StreamControlTests(unittest.TestCase):
+    def test_channel_search_matches_regional_station_name(self):
+        channels = [
+            {"name": "US| CBS 13 SACRAMENTO CA (KOVR)", "stream_id": "173140"},
+            {"name": "US| CBS 5 SAN FRANCISCO CA (KPIX)", "stream_id": "173141"},
+        ]
+
+        matches = rank_search_matches("cbs sacramento", channels, lambda channel: channel["name"], limit=2)
+
+        self.assertEqual(matches[0][1]["stream_id"], "173140")
+
+    def test_channel_search_matches_affiliate_callsign_and_network_alias(self):
+        channels = [
+            {"name": "US| CBS 13 SACRAMENTO CA", "epg_channel_id": "loc.CBS (KOVR) Sacramento, CA", "stream_id": "173140"},
+            {"name": "US| ABC 10 SACRAMENTO CA", "epg_channel_id": "loc.ABC (KXTV) Sacramento, CA", "stream_id": "172932"},
+        ]
+
+        kovr_matches = rank_catalog_channels("KOVR", channels, limit=2)
+        cbs_matches = rank_catalog_channels("CBS Sacramento", channels, limit=2)
+        kxtv_matches = rank_catalog_channels("KXTV", channels, limit=2)
+
+        self.assertEqual(kovr_matches[0][1]["stream_id"], "173140")
+        self.assertEqual(cbs_matches[0][1]["stream_id"], "173140")
+        self.assertEqual(kxtv_matches[0][1]["stream_id"], "172932")
+
+    def test_channel_search_matches_show_with_quality_and_playlist_prefixes(self):
+        channels = [
+            {"name": "US| 24/7 KING OF THE HILL", "stream_id": "559534"},
+            {"name": "US| SOUTH PARK FHD", "stream_id": "1430221"},
+        ]
+
+        king_matches = rank_search_matches("King of the Hill", channels, lambda channel: channel["name"])
+        south_park_matches = rank_search_matches("south-park", channels, lambda channel: channel["name"])
+
+        self.assertEqual(king_matches[0][1]["stream_id"], "559534")
+        self.assertEqual(south_park_matches[0][1]["stream_id"], "1430221")
+
     def test_play_command_has_session_and_payload(self):
         command = build_play_command(
             session_id="sess-123",
