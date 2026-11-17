@@ -10,10 +10,22 @@
 ## Runtime And Build
 
 - The supported deployment is Docker Compose: `docker compose up -d --build`.
+- For deployment on the 2018 Mac mini, first verify macOS, CPU architecture, Docker Desktop installation, and that Docker is running; do not assume any of these. Prefer Compose initially because the image pins the Linux runtime and native dependencies. Do not switch to a native macOS build without checking dependency compatibility.
+- If working through a remote VS Code session, operate only in the connected workspace and its terminal. Do not request SSH credentials or claim access to another machine; give the user commands to run if it is not connected.
+- Preserve the existing working tree during migration. Check `git status --short` and carry over needed tracked edits and untracked fixtures such as `test_media/`; do not replace the checkout with a clean clone unless the user approves.
 - The selfbot currently uses `@dank074/discord-video-stream` 6.x with `discord.js-selfbot-v13` 3.7.x on Node 22.
 - v7 requires a newer glibc native addon than Debian Bookworm provides. v6's `@lng2004/node-datachannel` addon was verified to load on Bookworm; do not upgrade without checking native dependencies in the final image.
 - `.dockerignore` must exclude both `streambot/node_modules/` and `streambot/dist/`. Otherwise the final `COPY . .` can overwrite the dependencies and compiled bundle installed by the builder stage.
 - The Compose mount `./test_media:/app/test_media:ro` is a local test fixture, not a production stream override. No `STREAM_TEST_FILE` override should be enabled for normal IPTV mode.
+
+## Mac Mini Migration And Startup
+
+- Keep the Mac plugged in and confirm its sleep settings support the user's intended uptime. Do not change system power settings without the user's approval.
+- Never ask the user to paste tokens, passwords, IPTV URLs, `.env` contents, SSH keys, or other credentials into chat or logs. Have them transfer secret files to the new host over a secure channel, keep them out of Git, and do not print their contents.
+- The root `.env` supplies the Python bot's configuration and is the `env_file` declared by Compose. `streambot/.env` supplies the selfbot's `TOKEN` and other streambot settings; the Node child runs with `streambot/` as its working directory and loads dotenv there. Inspect both `.dockerignore` and Compose before launch to ensure secrets are neither baked into the image nor omitted from the runtime. Compose currently explicitly declares only the root `.env`; verify how the child receives its required configuration without printing values.
+- From the repository root, build and start with `docker compose up -d --build`, then check `docker compose ps`. Do not use `docker compose config` in a way that prints resolved secret values.
+- When join or stream fails, inspect recent service logs locally and share only sanitized excerpts. Check selfbot login/readiness, configured guild and channel lookup, join timeout/error, FFmpeg/encoder errors, and whether streaming actually begins. Do not assume Docker networking or host hardware is the cause without evidence; the current stream encoder uses software encoding by default.
+- Validate the end-to-end voice join and video stream before calling migration complete. For runtime diagnostics use `docker compose logs --since=10m --no-color`, taking care not to disclose credentials or tokens.
 
 ## Search And EPG
 
