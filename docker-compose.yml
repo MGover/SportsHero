@@ -3,5 +3,5 @@ services:
     build: .
     env_file:
       - .env
-    restart: unless-stopped
+    restart: "no"
     network_mode: bridge
