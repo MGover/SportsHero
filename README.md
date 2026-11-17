@@ -66,8 +66,8 @@ If you get "Logged in as <BotNameHere>" then you got everything right so far.
 ## Commands
 |Command|Description|
 |---------|---------|
-|/watch|Search active programmes by title, then fall back to named IPTV streams such as 24/7 shows or local stations|
-|/watch_channel|Search IPTV channel names and regions, for example `CBS Sacramento`|
+|/watch, /search|Search active programmes by title, then fall back to named IPTV streams such as 24/7 shows|
+|/watch_channel, /search_channel|Search IPTV channel names and regions, for example `CBS Sacramento` or `NFL Network`|
 |/stop| Tells the bot to stop streaming|
 
 *Special Notes About Commands*: 

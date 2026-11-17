@@ -289,7 +289,7 @@ def find_program_stream(query, channels):
         query,
         epg_data,
         lambda programme: programme[0],
-        limit=10,
+        limit=100,
         minimum_score=0.58,
     )
     channels_by_epg_id = {}
@@ -517,6 +517,22 @@ async def watch_channel(interaction: discord.Interaction, searchterm: str):
         active_stream_session = None
         await interaction.followup.send(f"Failed to send stream payload: {e}")
         return
+
+@tree.command(name="search", description="Search live programmes and streams")
+async def search(interaction: discord.Interaction, searchterm: str):
+    await watch.callback(interaction, searchterm)
+
+@search.autocomplete("searchterm")
+async def search_autocomplete(interaction: discord.Interaction, current: str):
+    return await watch_autocomplete(interaction, current)
+
+@tree.command(name="search_channel", description="Search IPTV channels by name or region")
+async def search_channel(interaction: discord.Interaction, searchterm: str):
+    await watch_channel.callback(interaction, searchterm)
+
+@search_channel.autocomplete("searchterm")
+async def search_channel_autocomplete(interaction: discord.Interaction, current: str):
+    return await watch_channel_autocomplete(interaction, current)
 
 @watch.autocomplete("searchterm")
 async def watch_autocomplete(interaction: discord.Interaction, current: str):

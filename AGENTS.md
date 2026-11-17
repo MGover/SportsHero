@@ -29,8 +29,8 @@
 
 ## Search And EPG
 
-- `/watch` searches currently airing XMLTV programme titles first, then falls back to matching IPTV catalog names such as dedicated 24/7 show streams.
-- `/watch_channel` searches IPTV catalog display names, XMLTV IDs, custom SIDs, and supported affiliate aliases. It is intended for station queries such as `CBS Sacramento` or station callsigns such as `KOVR`.
+- `/watch` and `/search` search currently airing XMLTV programme titles first, then fall back to matching IPTV catalog names such as dedicated 24/7 show streams.
+- `/watch_channel` and `/search_channel` search IPTV catalog display names, XMLTV IDs, custom SIDs, and supported affiliate aliases. They are intended for station queries such as `CBS Sacramento` or station callsigns such as `KOVR`.
 - The IPTV API channel records expose `name`, `stream_id`, `stream_type`, and `epg_channel_id`; many dedicated 24/7 streams have an empty EPG ID.
 - The configured `EPG_URL` may be invalid or unavailable. The bot tries it first and falls back to the provider XMLTV endpoint, derived from `M3U_URL` credentials.
 - Discord application-command autocomplete is limited to 25 choices per response. Improve ranking and relevance rather than attempting to return 200 choices in one autocomplete response.

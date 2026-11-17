@@ -29,6 +29,16 @@ class StreamControlTests(unittest.TestCase):
         self.assertEqual(cbs_matches[0][1]["stream_id"], "173140")
         self.assertEqual(kxtv_matches[0][1]["stream_id"], "172932")
 
+    def test_nfl_network_query_prefers_us_epg_mapping(self):
+        channels = [
+            {"name": "MXC| NFL NETWORK", "epg_channel_id": "", "stream_id": "1870426"},
+            {"name": "US| NFL NETWORK HD", "epg_channel_id": "NFLNetwork.us", "stream_id": "45526"},
+        ]
+
+        matches = rank_catalog_channels("NFL Network", channels, limit=2)
+
+        self.assertEqual(matches[0][1]["stream_id"], "45526")
+
     def test_channel_search_matches_show_with_quality_and_playlist_prefixes(self):
         channels = [
             {"name": "US| 24/7 KING OF THE HILL", "stream_id": "559534"},

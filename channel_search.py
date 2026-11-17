@@ -13,6 +13,12 @@ SACRAMENTO_AFFILIATE_CALLSIGNS = {
     "KTXL": "FOX Sacramento",
 }
 
+EPG_CHANNEL_QUERY_ALIASES = {
+    "nfl network": "NFLNetwork.us",
+    "nfl redzone": "NFLRedZone.us",
+    "nfl red zone": "US-NFL Red Zone",
+}
+
 
 def normalize_search_text(value: object) -> str:
     text = unicodedata.normalize("NFKD", str(value or "")).encode("ascii", "ignore").decode("ascii")
@@ -92,6 +98,9 @@ def rank_catalog_channels(query: str, records: Iterable[dict], limit: int = 25, 
         for callsign, alias in SACRAMENTO_AFFILIATE_CALLSIGNS.items():
             if callsign.casefold() in metadata_tokens:
                 search_fields.append(alias)
+        preferred_epg_id = EPG_CHANNEL_QUERY_ALIASES.get(normalize_search_text(query))
+        if preferred_epg_id and str(record.get("epg_channel_id") or "").casefold() == preferred_epg_id.casefold():
+            search_fields.append(query)
 
         score = max((score_search_match(query, field) for field in search_fields), default=0.0)
         if score >= minimum_score:
