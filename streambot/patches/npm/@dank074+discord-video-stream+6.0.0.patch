@@ -1,18 +1,5 @@
-diff --git a/node_modules/@dank074/discord-video-stream/dist/client/Streamer.js b/node_modules/@dank074/discord-video-stream/dist/client/Streamer.js
-index 3109adf..9fbf8b8 100644
---- a/node_modules/@dank074/discord-video-stream/dist/client/Streamer.js
-+++ b/node_modules/@dank074/discord-video-stream/dist/client/Streamer.js
-@@ -88,7 +88,7 @@ export class Streamer {
-             if (!session_id)
-                 throw new Error("Session doesn't exist yet");
-             const streamConn = new StreamConnection(this, clientGuildId, clientUserId, clientChannelId, (conn) => {
--                resolve(conn);
-+                conn.waitForTracksOpen().then(() => resolve(conn), reject);
-             });
-             this.voiceConnection.streamConnection = streamConn;
-             this._gatewayEmitter.on("STREAM_CREATE", (d) => {
 diff --git a/node_modules/@dank074/discord-video-stream/dist/client/voice/WebRtcWrapper.js b/node_modules/@dank074/discord-video-stream/dist/client/voice/WebRtcWrapper.js
-index 3aaa0ca..7d5e311 100644
+index 3aaa0ca..6527e15 100644
 --- a/node_modules/@dank074/discord-video-stream/dist/client/voice/WebRtcWrapper.js
 +++ b/node_modules/@dank074/discord-video-stream/dist/client/voice/WebRtcWrapper.js
 @@ -66,11 +66,47 @@ export class WebRtcConnWrapper {
@@ -43,7 +30,7 @@ index 3aaa0ca..7d5e311 100644
 +        };
 +        let timeout;
 +        const timeoutPromise = new Promise((_, reject) => {
-+            timeout = setTimeout(() => reject(new Error(`WebRTC media tracks did not open within ${timeoutMs}ms`)), timeoutMs);
++            timeout = setTimeout(() => reject(new Error(`WebRTC media tracks did not open within ${timeoutMs}ms (peer=${this._webRtcConn?.state() ?? "unavailable"}, ICE=${this._webRtcConn?.iceState() ?? "unavailable"})`)), timeoutMs);
 +        });
 +        return Promise.race([
 +            Promise.all([
@@ -89,7 +76,7 @@ index 861053d..e149738 100644
                      break;
                  case AVCodecID.AV_CODEC_ID_HEVC:
 diff --git a/node_modules/@dank074/discord-video-stream/dist/media/newApi.js b/node_modules/@dank074/discord-video-stream/dist/media/newApi.js
-index d00994c..9425e29 100644
+index d00994c..59bc1f1 100644
 --- a/node_modules/@dank074/discord-video-stream/dist/media/newApi.js
 +++ b/node_modules/@dank074/discord-video-stream/dist/media/newApi.js
 @@ -109,7 +109,7 @@ export function prepareStream(input, options = {}, cancelSignal) {
@@ -136,24 +123,20 @@ index d00994c..9425e29 100644
          width: (video) => video.width,
          height: (video) => video.height,
          frameRate: (video) => video.framerate_num / video.framerate_den,
-diff --git a/node_modules/@dank074/discord-video-stream/src/client/Streamer.ts b/node_modules/@dank074/discord-video-stream/src/client/Streamer.ts
-index deed6f5..fd10414 100644
---- a/node_modules/@dank074/discord-video-stream/src/client/Streamer.ts
-+++ b/node_modules/@dank074/discord-video-stream/src/client/Streamer.ts
-@@ -130,7 +130,7 @@ export class Streamer {
-         clientUserId,
-         clientChannelId,
-         (conn) => {
--          resolve(conn);
-+          conn.waitForTracksOpen().then(() => resolve(conn), reject);
-         },
-       );
-       this.voiceConnection.streamConnection = streamConn;
+@@ -312,6 +306,8 @@ export async function playStream(input, streamer, options = {}, cancelSignal) {
+         height: Math.round(typeof height === "function" ? height(video) : height),
+         fps: Math.round(typeof frameRate === "function" ? frameRate(video) : frameRate),
+     });
++    if (mergedOptions.type === "go-live")
++        await conn.waitForTracksOpen();
+     const vStream = new VideoStream(conn);
+     video.stream.pipe(vStream);
+     if (audio) {
 diff --git a/node_modules/@dank074/discord-video-stream/src/client/voice/WebRtcWrapper.ts b/node_modules/@dank074/discord-video-stream/src/client/voice/WebRtcWrapper.ts
-index 997d78e..5761af2 100644
+index 997d78e..0f32822 100644
 --- a/node_modules/@dank074/discord-video-stream/src/client/voice/WebRtcWrapper.ts
 +++ b/node_modules/@dank074/discord-video-stream/src/client/voice/WebRtcWrapper.ts
-@@ -101,9 +101,44 @@ export class WebRtcConnWrapper {
+@@ -101,9 +101,49 @@ export class WebRtcConnWrapper {
      return this._mediaConn;
    }
  
@@ -178,7 +161,12 @@ index 997d78e..5761af2 100644
 +    let timeout: ReturnType<typeof setTimeout>;
 +    const timeoutPromise = new Promise<void>((_, reject) => {
 +      timeout = setTimeout(
-+        () => reject(new Error(`WebRTC media tracks did not open within ${timeoutMs}ms`)),
++        () =>
++          reject(
++            new Error(
++              `WebRTC media tracks did not open within ${timeoutMs}ms (peer=${this._webRtcConn?.state() ?? "unavailable"}, ICE=${this._webRtcConn?.iceState() ?? "unavailable"})`,
++            ),
++          ),
 +        timeoutMs,
 +      );
 +    });
@@ -198,7 +186,7 @@ index 997d78e..5761af2 100644
      const { rtpConfig } = this._audioPacketizer;
      const { clockRate } = rtpConfig;
      if (this.mediaConnection.daveReady)
-@@ -115,6 +150,7 @@ export class WebRtcConnWrapper {
+@@ -115,6 +155,7 @@ export class WebRtcConnWrapper {
    public sendVideoFrame(frame: Buffer, frametime: number) {
      if (!this.ready) return;
      if (!this._videoPacketizer) return;
@@ -225,7 +213,7 @@ index 01ebf72..422b936 100644
            break;
          case AVCodecID.AV_CODEC_ID_HEVC:
 diff --git a/node_modules/@dank074/discord-video-stream/src/media/newApi.ts b/node_modules/@dank074/discord-video-stream/src/media/newApi.ts
-index 3b8682a..12ca25d 100644
+index 3b8682a..43043ad 100644
 --- a/node_modules/@dank074/discord-video-stream/src/media/newApi.ts
 +++ b/node_modules/@dank074/discord-video-stream/src/media/newApi.ts
 @@ -250,7 +250,7 @@ export function prepareStream(
@@ -272,3 +260,11 @@ index 3b8682a..12ca25d 100644
      width: (video) => video.width,
      height: (video) => video.height,
      frameRate: (video) => video.framerate_num / video.framerate_den,
+@@ -536,6 +530,7 @@ export async function playStream(
+       typeof frameRate === "function" ? frameRate(video) : frameRate,
+     ),
+   });
++  if (mergedOptions.type === "go-live") await conn.waitForTracksOpen();
+ 
+   const vStream = new VideoStream(conn);
+   video.stream.pipe(vStream);

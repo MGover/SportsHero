@@ -6,6 +6,10 @@ import path from 'path';
 import readline from 'node:readline';
 import logger from './utils/logger.js';
 
+function redactUrls(text: string): string {
+    return text.replace(/https?:\/\/[^\s"'<>]+/gi, '[URL redacted]');
+}
+
 const client = new Client();
 const streamer = new Streamer(client);
 const originalSendOpcode = streamer.sendOpcode.bind(streamer);
@@ -184,7 +188,7 @@ async function playVideo(sessionId: string, video: string, title?: string, chann
         return;
     }
 
-    logger.info('Starting video: ' + video);
+    logger.info(`Starting stream session=${sessionId}`);
     logger.info(`Selfbot join attempt: guild=${guildId} channel=${channelId} title=${title ?? ''} session=${sessionId}`);
 
     streamStatus.manualStop = false;
@@ -205,21 +209,21 @@ async function playVideo(sessionId: string, video: string, title?: string, chann
 
         controller?.abort();
         controller = new AbortController();
-        logger.info(`stream start: preparing ffmpeg for session=${sessionId} source=${video}`);
+        logger.info(`stream start: preparing ffmpeg for session=${sessionId}`);
 
         const { command, output } = prepareStream(video, streamOpts, controller.signal);
         logger.info(`stream start: ffmpeg command object created for session=${sessionId}`);
-        command.on('start', (commandLine) => {
-            logger.info('FFmpeg started: ' + commandLine);
+        command.on('start', () => {
+            logger.info(`FFmpeg started for session=${sessionId}`);
         });
         command.on('stderr', (data) => {
-            const text = data.toString().trim();
+            const text = redactUrls(data.toString().trim());
             if (text) {
                 logger.info('FFmpeg stderr: ' + text);
             }
         });
         command.on('error', (err) => {
-            logger.info('An error happened with ffmpeg: ' + err);
+            logger.info('An error happened with ffmpeg: ' + redactUrls(String(err)));
         });
         command.on('end', () => {
             logger.info('FFmpeg ended normally for session ' + sessionId);
@@ -230,7 +234,7 @@ async function playVideo(sessionId: string, video: string, title?: string, chann
             await playStream(output, streamer, { type: 'go-live' }, controller.signal);
             logger.info(`playStream resolved without raising an exception for session ${sessionId}`);
         } catch (err) {
-            logger.info('playStream catch: ' + err);
+            logger.info('playStream catch: ' + redactUrls(String(err)));
             controller?.abort();
             throw err;
         }
@@ -240,8 +244,8 @@ async function playVideo(sessionId: string, video: string, title?: string, chann
             await cleanupStreamStatus();
         }
     } catch (error) {
-        logger.info('Error occurred while playing video: ' + error);
-        logger.info(`Join/play debug: guild=${guildId} channel=${channelId} video=${video} session=${sessionId}`);
+        logger.info('Error occurred while playing video: ' + redactUrls(String(error)));
+        logger.info(`Join/play debug: guild=${guildId} channel=${channelId} session=${sessionId}`);
         controller?.abort();
         if (!streamStatus.manualStop && streamStatus.currentSessionId === sessionId) {
             await cleanupStreamStatus();
@@ -294,7 +298,7 @@ rl.on('line', async (input: string) => {
         return;
     }
 
-    logger.info(`Input received: ${trimmed}`);
+    logger.info('Streambot command received');
 
     try {
         const command = JSON.parse(trimmed) as StreamCommand;
@@ -308,13 +312,13 @@ rl.on('line', async (input: string) => {
             const title = command.title || '';
 
             if (!videoUrl || !channelId || !guildId) {
-                logger.info(`Rejected invalid play command: ${trimmed}`);
+                logger.info(`Rejected invalid play command session=${sessionId}`);
                 return;
             }
 
             logger.info(`Dispatching play for session=${sessionId} guild=${guildId} channel=${channelId}`);
             await playVideo(sessionId, videoUrl, title, channelId, guildId).catch((err) => {
-                logger.info(`playVideo promise rejected: ${err}`);
+                logger.info(`playVideo promise rejected: ${redactUrls(String(err))}`);
             });
             return;
         }
@@ -340,9 +344,9 @@ rl.on('line', async (input: string) => {
         if (prefix === 'http') {
             const [link, channelId, guildId, ...rest] = trimmed.split(' ');
             const title = rest.join(' ');
-            logger.info(`Legacy URL command received: ${link} channel=${channelId} guild=${guildId}`);
+            logger.info(`Legacy URL command received channel=${channelId} guild=${guildId}`);
             await playVideo(`legacy-${Date.now()}`, link, title, channelId, guildId).catch((err) => {
-                logger.info(`legacy playVideo promise rejected: ${err}`);
+                logger.info(`legacy playVideo promise rejected: ${redactUrls(String(err))}`);
             });
             return;
         }
@@ -355,7 +359,7 @@ rl.on('line', async (input: string) => {
             return;
         }
 
-        logger.info(`Could not parse command input: ${trimmed} | ${error}`);
+        logger.info(`Could not parse streambot command: ${error}`);
     }
 });
 
