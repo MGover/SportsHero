@@ -1,0 +1,274 @@
+diff --git a/node_modules/@dank074/discord-video-stream/dist/client/Streamer.js b/node_modules/@dank074/discord-video-stream/dist/client/Streamer.js
+index 3109adf..9fbf8b8 100644
+--- a/node_modules/@dank074/discord-video-stream/dist/client/Streamer.js
++++ b/node_modules/@dank074/discord-video-stream/dist/client/Streamer.js
+@@ -88,7 +88,7 @@ export class Streamer {
+             if (!session_id)
+                 throw new Error("Session doesn't exist yet");
+             const streamConn = new StreamConnection(this, clientGuildId, clientUserId, clientChannelId, (conn) => {
+-                resolve(conn);
++                conn.waitForTracksOpen().then(() => resolve(conn), reject);
+             });
+             this.voiceConnection.streamConnection = streamConn;
+             this._gatewayEmitter.on("STREAM_CREATE", (d) => {
+diff --git a/node_modules/@dank074/discord-video-stream/dist/client/voice/WebRtcWrapper.js b/node_modules/@dank074/discord-video-stream/dist/client/voice/WebRtcWrapper.js
+index 3aaa0ca..7d5e311 100644
+--- a/node_modules/@dank074/discord-video-stream/dist/client/voice/WebRtcWrapper.js
++++ b/node_modules/@dank074/discord-video-stream/dist/client/voice/WebRtcWrapper.js
+@@ -66,11 +66,47 @@ export class WebRtcConnWrapper {
+     get mediaConnection() {
+         return this._mediaConn;
+     }
++    waitForTracksOpen(timeoutMs = 15000) {
++        const waitForTrack = (track, name) => {
++            if (!track)
++                return Promise.reject(new Error(`WebRTC ${name} track is unavailable`));
++            return new Promise((resolve, reject) => {
++                let settled = false;
++                const finish = (error) => {
++                    if (settled)
++                        return;
++                    settled = true;
++                    if (error)
++                        reject(error);
++                    else
++                        resolve();
++                };
++                track.onOpen(() => finish());
++                track.onClosed(() => finish(new Error(`WebRTC ${name} track closed before opening`)));
++                track.onError((error) => finish(new Error(`WebRTC ${name} track failed: ${error}`)));
++                if (track.isOpen())
++                    finish();
++            });
++        };
++        let timeout;
++        const timeoutPromise = new Promise((_, reject) => {
++            timeout = setTimeout(() => reject(new Error(`WebRTC media tracks did not open within ${timeoutMs}ms`)), timeoutMs);
++        });
++        return Promise.race([
++            Promise.all([
++                waitForTrack(this._audioTrack, "audio"),
++                waitForTrack(this._videoTrack, "video"),
++            ]).then(() => undefined),
++            timeoutPromise,
++        ]).finally(() => clearTimeout(timeout));
++    }
+     sendAudioFrame(frame, frametime) {
+         if (!this.ready)
+             return;
+         if (!this._audioPacketizer)
+             return;
++        if (!this._audioTrack?.isOpen())
++            return;
+         const { rtpConfig } = this._audioPacketizer;
+         const { clockRate } = rtpConfig;
+         if (this.mediaConnection.daveReady)
+@@ -83,6 +119,8 @@ export class WebRtcConnWrapper {
+             return;
+         if (!this._videoPacketizer)
+             return;
++        if (!this._videoTrack?.isOpen())
++            return;
+         const { rtpConfig } = this._videoPacketizer;
+         const { clockRate } = rtpConfig;
+         if (this._videoCodec === "H264") {
+diff --git a/node_modules/@dank074/discord-video-stream/dist/media/LibavDemuxer.js b/node_modules/@dank074/discord-video-stream/dist/media/LibavDemuxer.js
+index 861053d..e149738 100644
+--- a/node_modules/@dank074/discord-video-stream/dist/media/LibavDemuxer.js
++++ b/node_modules/@dank074/discord-video-stream/dist/media/LibavDemuxer.js
+@@ -99,11 +99,6 @@ export async function demux(input, { format }) {
+             switch (codecId) {
+                 case AVCodecID.AV_CODEC_ID_H264:
+                     vbsf.push(BitStreamFilterAPI.create("h264_mp4toannexb", vStream));
+-                    vbsf.push(BitStreamFilterAPI.create("h264_metadata", vStream, {
+-                        options: {
+-                            aud: "remove",
+-                        },
+-                    }));
+                     vbsf.push(BitStreamFilterAPI.create("dump_extra", vStream));
+                     break;
+                 case AVCodecID.AV_CODEC_ID_HEVC:
+diff --git a/node_modules/@dank074/discord-video-stream/dist/media/newApi.js b/node_modules/@dank074/discord-video-stream/dist/media/newApi.js
+index d00994c..9425e29 100644
+--- a/node_modules/@dank074/discord-video-stream/dist/media/newApi.js
++++ b/node_modules/@dank074/discord-video-stream/dist/media/newApi.js
+@@ -109,7 +109,7 @@ export function prepareStream(input, options = {}, cancelSignal) {
+         command.inputOption("-scan_all_pmts 0");
+     }
+     // general output options
+-    command.output(output).outputFormat("nut");
++    command.output(output).outputFormat("matroska");
+     // video setup
+     const { noTranscoding, width, height, frameRate, bitrateVideo, bitrateVideoMax, videoCodec, encoder, } = mergedOptions;
+     command.addOutputOption("-map 0:v");
+@@ -158,7 +158,7 @@ export function prepareStream(input, options = {}, cancelSignal) {
+             .audioFrequency(48000)
+             .audioCodec("libopus")
+             .audioBitrate(`${bitrateAudio}k`)
+-            .audioFilters("volume@internal_lib=1.0");
++            .audioFilters("volume@internal_lib=1.0", "aresample=async=1000");
+     // Add custom ffmpeg flags
+     if (mergedOptions.customFfmpegFlags &&
+         mergedOptions.customFfmpegFlags.length > 0) {
+@@ -190,14 +190,8 @@ export function prepareStream(input, options = {}, cancelSignal) {
+         function randomInclusive(start, end) {
+             return Math.floor(Math.random() * (end - start + 1)) + start;
+         }
+-        // Last octet is from 2 to 254 to avoid WSL2 shenanigans
+-        const loopbackIp = [
+-            127,
+-            randomInclusive(0, 255),
+-            randomInclusive(0, 255),
+-            randomInclusive(2, 254),
+-        ].join(".");
+-        const zmqEndpoint = `tcp://${loopbackIp}:42069`;
++        const zmqPort = randomInclusive(49152, 65535);
++        const zmqEndpoint = `tcp://127.0.0.1:${zmqPort}`;
+         command.audioFilters(`azmq=b=${zmqEndpoint.replaceAll(":", "\\\\:")}`);
+         zmqClientPromise = import("zeromq").then((zmq) => {
+             const client = new zmq.Request({
+@@ -246,7 +240,7 @@ export async function playStream(input, streamer, options = {}, cancelSignal) {
+         throw new Error("Bot is not connected to a voice channel");
+     const defaultOptions = {
+         type: "go-live",
+-        format: "nut",
++        format: "matroska",
+         width: (video) => video.width,
+         height: (video) => video.height,
+         frameRate: (video) => video.framerate_num / video.framerate_den,
+diff --git a/node_modules/@dank074/discord-video-stream/src/client/Streamer.ts b/node_modules/@dank074/discord-video-stream/src/client/Streamer.ts
+index deed6f5..fd10414 100644
+--- a/node_modules/@dank074/discord-video-stream/src/client/Streamer.ts
++++ b/node_modules/@dank074/discord-video-stream/src/client/Streamer.ts
+@@ -130,7 +130,7 @@ export class Streamer {
+         clientUserId,
+         clientChannelId,
+         (conn) => {
+-          resolve(conn);
++          conn.waitForTracksOpen().then(() => resolve(conn), reject);
+         },
+       );
+       this.voiceConnection.streamConnection = streamConn;
+diff --git a/node_modules/@dank074/discord-video-stream/src/client/voice/WebRtcWrapper.ts b/node_modules/@dank074/discord-video-stream/src/client/voice/WebRtcWrapper.ts
+index 997d78e..5761af2 100644
+--- a/node_modules/@dank074/discord-video-stream/src/client/voice/WebRtcWrapper.ts
++++ b/node_modules/@dank074/discord-video-stream/src/client/voice/WebRtcWrapper.ts
+@@ -101,9 +101,44 @@ export class WebRtcConnWrapper {
+     return this._mediaConn;
+   }
+ 
++  public waitForTracksOpen(timeoutMs = 15_000): Promise<void> {
++    const waitForTrack = (track: Track | undefined, name: string) => {
++      if (!track) return Promise.reject(new Error(`WebRTC ${name} track is unavailable`));
++      return new Promise<void>((resolve, reject) => {
++        let settled = false;
++        const finish = (error?: Error) => {
++          if (settled) return;
++          settled = true;
++          if (error) reject(error);
++          else resolve();
++        };
++        track.onOpen(() => finish());
++        track.onClosed(() => finish(new Error(`WebRTC ${name} track closed before opening`)));
++        track.onError((error) => finish(new Error(`WebRTC ${name} track failed: ${error}`)));
++        if (track.isOpen()) finish();
++      });
++    };
++
++    let timeout: ReturnType<typeof setTimeout>;
++    const timeoutPromise = new Promise<void>((_, reject) => {
++      timeout = setTimeout(
++        () => reject(new Error(`WebRTC media tracks did not open within ${timeoutMs}ms`)),
++        timeoutMs,
++      );
++    });
++    return Promise.race([
++      Promise.all([
++        waitForTrack(this._audioTrack, "audio"),
++        waitForTrack(this._videoTrack, "video"),
++      ]).then(() => undefined),
++      timeoutPromise,
++    ]).finally(() => clearTimeout(timeout));
++  }
++
+   public sendAudioFrame(frame: Buffer, frametime: number) {
+     if (!this.ready) return;
+     if (!this._audioPacketizer) return;
++    if (!this._audioTrack?.isOpen()) return;
+     const { rtpConfig } = this._audioPacketizer;
+     const { clockRate } = rtpConfig;
+     if (this.mediaConnection.daveReady)
+@@ -115,6 +150,7 @@ export class WebRtcConnWrapper {
+   public sendVideoFrame(frame: Buffer, frametime: number) {
+     if (!this.ready) return;
+     if (!this._videoPacketizer) return;
++    if (!this._videoTrack?.isOpen()) return;
+     const { rtpConfig } = this._videoPacketizer;
+     const { clockRate } = rtpConfig;
+     if (this._videoCodec === "H264") {
+diff --git a/node_modules/@dank074/discord-video-stream/src/media/LibavDemuxer.ts b/node_modules/@dank074/discord-video-stream/src/media/LibavDemuxer.ts
+index 01ebf72..422b936 100644
+--- a/node_modules/@dank074/discord-video-stream/src/media/LibavDemuxer.ts
++++ b/node_modules/@dank074/discord-video-stream/src/media/LibavDemuxer.ts
+@@ -151,13 +151,6 @@ export async function demux(input: Readable, { format }: DemuxerOptions) {
+       switch (codecId) {
+         case AVCodecID.AV_CODEC_ID_H264:
+           vbsf.push(BitStreamFilterAPI.create("h264_mp4toannexb", vStream));
+-          vbsf.push(
+-            BitStreamFilterAPI.create("h264_metadata", vStream, {
+-              options: {
+-                aud: "remove",
+-              },
+-            }),
+-          );
+           vbsf.push(BitStreamFilterAPI.create("dump_extra", vStream));
+           break;
+         case AVCodecID.AV_CODEC_ID_HEVC:
+diff --git a/node_modules/@dank074/discord-video-stream/src/media/newApi.ts b/node_modules/@dank074/discord-video-stream/src/media/newApi.ts
+index 3b8682a..12ca25d 100644
+--- a/node_modules/@dank074/discord-video-stream/src/media/newApi.ts
++++ b/node_modules/@dank074/discord-video-stream/src/media/newApi.ts
+@@ -250,7 +250,7 @@ export function prepareStream(
+   }
+ 
+   // general output options
+-  command.output(output).outputFormat("nut");
++  command.output(output).outputFormat("matroska");
+ 
+   // video setup
+   const {
+@@ -312,7 +312,7 @@ export function prepareStream(
+       .audioFrequency(48000)
+       .audioCodec("libopus")
+       .audioBitrate(`${bitrateAudio}k`)
+-      .audioFilters("volume@internal_lib=1.0");
++      .audioFilters("volume@internal_lib=1.0", "aresample=async=1000");
+ 
+   // Add custom ffmpeg flags
+   if (
+@@ -348,14 +348,8 @@ export function prepareStream(
+     function randomInclusive(start: number, end: number) {
+       return Math.floor(Math.random() * (end - start + 1)) + start;
+     }
+-    // Last octet is from 2 to 254 to avoid WSL2 shenanigans
+-    const loopbackIp = [
+-      127,
+-      randomInclusive(0, 255),
+-      randomInclusive(0, 255),
+-      randomInclusive(2, 254),
+-    ].join(".");
+-    const zmqEndpoint = `tcp://${loopbackIp}:42069`;
++    const zmqPort = randomInclusive(49152, 65535);
++    const zmqEndpoint = `tcp://127.0.0.1:${zmqPort}`;
+     command.audioFilters(`azmq=b=${zmqEndpoint.replaceAll(":", "\\\\:")}`);
+     zmqClientPromise = import("zeromq").then((zmq) => {
+       const client = new zmq.Request({
+@@ -454,7 +448,7 @@ export async function playStream(
+ 
+   const defaultOptions = {
+     type: "go-live",
+-    format: "nut",
++    format: "matroska",
+     width: (video) => video.width,
+     height: (video) => video.height,
+     frameRate: (video) => video.framerate_num / video.framerate_den,

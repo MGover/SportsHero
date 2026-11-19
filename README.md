@@ -66,14 +66,18 @@ If you get "Logged in as <BotNameHere>" then you got everything right so far.
 ## Commands
 |Command|Description|
 |---------|---------|
+|/help|Show available commands and usage|
 |/watch, /search|Search active programmes by title, then fall back to named IPTV streams such as 24/7 shows|
 |/watch_channel, /search_channel|Search IPTV channel names and regions, for example `CBS Sacramento` or `NFL Network`|
 |/stop| Tells the bot to stop streaming|
+|/leave|Stops the stream and leaves the voice channel|
 
 *Special Notes About Commands*: 
 - These commands are slow. The bot may take up to a whole 30 seconds to start streaming, and even longer to stop. This is mostly due to how I implemented the Python portion of this project interfacing with the TypeScript portion.
 - These commands fail sometimes. If the stream doesn't start, try again. Try /stop then try /watch. Or just keep trying /watch. This can depend on the rules of your OS
 - If the bot replies with "Channel Stream Not Found", that's typically a miss on the Electronic Programme Guide (EPG). There's no perfect EPG's out there. I recommend using the one your service provider gives you before turning to public EPG sources
+
+The audio stream uses FFmpeg's `aresample=async=1000` compensation to correct gradual timestamp drift from live sources.
 
 ## Configuration
 Reanme both .env.example files to .env

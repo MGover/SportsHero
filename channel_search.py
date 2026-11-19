@@ -81,10 +81,19 @@ def rank_search_matches(
     return [(score, record) for score, _, record in matches[:limit]]
 
 
-def rank_catalog_channels(query: str, records: Iterable[dict], limit: int = 25, minimum_score: float = 0.0):
-    if not normalize_search_text(query):
+def rank_catalog_channels(
+    query: str,
+    records: Iterable[dict],
+    limit: int = 25,
+    minimum_score: float = 0.0,
+    fast_autocomplete: bool = False,
+):
+    normalized_query = normalize_search_text(query)
+    if not normalized_query:
         return []
 
+    query_tokens = normalized_query.split()
+    preferred_epg_id = EPG_CHANNEL_QUERY_ALIASES.get(normalized_query)
     matches = []
     for record in records:
         display_name = str(record.get("name") or "")
@@ -98,9 +107,20 @@ def rank_catalog_channels(query: str, records: Iterable[dict], limit: int = 25, 
         for callsign, alias in SACRAMENTO_AFFILIATE_CALLSIGNS.items():
             if callsign.casefold() in metadata_tokens:
                 search_fields.append(alias)
-        preferred_epg_id = EPG_CHANNEL_QUERY_ALIASES.get(normalize_search_text(query))
+                metadata_tokens.update(normalize_search_text(alias).split())
         if preferred_epg_id and str(record.get("epg_channel_id") or "").casefold() == preferred_epg_id.casefold():
             search_fields.append(query)
+            metadata_tokens.update(normalize_search_text(query).split())
+
+        if fast_autocomplete and not any(
+            token in metadata_tokens
+            or (
+                len(token) >= 2
+                and any(candidate.startswith(token) for candidate in metadata_tokens)
+            )
+            for token in query_tokens
+        ):
+            continue
 
         score = max((score_search_match(query, field) for field in search_fields), default=0.0)
         if score >= minimum_score:

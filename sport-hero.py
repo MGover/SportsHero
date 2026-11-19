@@ -59,6 +59,7 @@ proc_bun = None
 epg_data = []
 m3u_data = []
 m3u_fetched_at = 0.0
+m3u_refresh_task = None
 active_stream_session = None
 M3U_CACHE_SECONDS = 300
 
@@ -259,6 +260,13 @@ async def fetch_m3u():
         print(f"Error fetching M3U: {resp.status_code}")
         return m3u_data
 
+def get_m3u_for_autocomplete():
+    global m3u_refresh_task
+    if time.monotonic() - m3u_fetched_at >= M3U_CACHE_SECONDS:
+        if m3u_refresh_task is None or m3u_refresh_task.done():
+            m3u_refresh_task = asyncio.create_task(fetch_m3u())
+    return m3u_data
+
 def build_stream_url(record):
     stream_id = record.get("stream_id")
     stream_type = record.get("stream_type") or "live"
@@ -457,6 +465,20 @@ async def leave(interaction: discord.Interaction):
     finally:
         active_stream_session = None
 
+@tree.command(name="help", description="Show SportsHero commands")
+async def help_command(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="SportsHero Commands",
+        description="Join a voice channel before starting a stream.",
+        color=discord.Color.blurple(),
+    )
+    embed.add_field(name="/watch <search>", value="Find a live programme or stream by name.", inline=False)
+    embed.add_field(name="/watch_channel <search>", value="Find an IPTV channel by name or region.", inline=False)
+    embed.add_field(name="/search and /search_channel", value="Aliases for `/watch` and `/watch_channel`.", inline=False)
+    embed.add_field(name="/stop", value="Stop the current stream.", inline=False)
+    embed.add_field(name="/leave", value="Stop the stream and leave voice.", inline=False)
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
 @tree.command(name="watch_channel", description="Search IPTV channels by name or region")
 async def watch_channel(interaction: discord.Interaction, searchterm: str):
     print(f"DEBUG watch_channel command: user={interaction.user.id} guild={interaction.guild_id} searchterm={searchterm}")
@@ -542,20 +564,31 @@ async def watch_autocomplete(interaction: discord.Interaction, current: str):
     choices = []
     seen_values = set()
 
-    for _, (title, _) in rank_search_matches(current, epg_data, lambda programme: programme[0], limit=25, minimum_score=0.42):
+    epg_matches = await asyncio.to_thread(
+        rank_search_matches,
+        current,
+        epg_data,
+        lambda programme: programme[0],
+        limit=25,
+        minimum_score=0.42,
+    )
+    for _, (title, _) in epg_matches:
         if title not in seen_values:
             choices.append(app_commands.Choice(name=title[:100], value=title[:100]))
             seen_values.add(title)
         if len(choices) >= 25:
             return choices
 
-    channels = await fetch_m3u()
-    for _, record in rank_catalog_channels(
+    channels = get_m3u_for_autocomplete()
+    channel_matches = await asyncio.to_thread(
+        rank_catalog_channels,
         current,
         (item for item in channels if item.get("name") and item.get("stream_id")),
         limit=25,
         minimum_score=0.48,
-    ):
+        fast_autocomplete=True,
+    )
+    for _, record in channel_matches:
         stream_id = str(record.get("stream_id"))
         value = f"stream:{stream_id}"
         if value in seen_values:
@@ -571,14 +604,17 @@ async def watch_channel_autocomplete(interaction: discord.Interaction, current: 
     current = (current or "").strip()
     if not current:
         return []
-    channels = await fetch_m3u()
-    choices = []
-    for _, record in rank_catalog_channels(
+    channels = get_m3u_for_autocomplete()
+    matches = await asyncio.to_thread(
+        rank_catalog_channels,
         current,
         (item for item in channels if item.get("name") and item.get("stream_id")),
         limit=25,
         minimum_score=0.42,
-    ):
+        fast_autocomplete=True,
+    )
+    choices = []
+    for _, record in matches:
         choices.append(app_commands.Choice(name=str(record["name"])[:100], value=str(record["stream_id"])))
     return choices
 

@@ -29,8 +29,10 @@ client.on('raw', (packet: any) => {
     }
     if (packet.t === 'VOICE_STATE_UPDATE' || packet.t === 'VOICE_SERVER_UPDATE' || packet.t === 'STREAM_CREATE' || packet.t === 'STREAM_SERVER_UPDATE') {
         const eventData = { ...packet.d };
-        if (packet.t === 'VOICE_SERVER_UPDATE' && eventData.token) {
-            eventData.token = '[redacted]';
+        for (const sensitiveField of ['token', 'stream_key']) {
+            if (sensitiveField in eventData) {
+                eventData[sensitiveField] = '[redacted]';
+            }
         }
         logger.info(`Discord raw gateway: ${packet.t} ${JSON.stringify(eventData)}`);
     }

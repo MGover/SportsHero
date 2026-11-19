@@ -39,6 +39,19 @@ class StreamControlTests(unittest.TestCase):
 
         self.assertEqual(matches[0][1]["stream_id"], "45526")
 
+    def test_fast_catalog_autocomplete_matches_prefixes_and_aliases(self):
+        channels = [
+            {"name": "US| CBS 13 SACRAMENTO CA", "epg_channel_id": "loc.CBS (KOVR) Sacramento, CA", "stream_id": "173140"},
+            {"name": "MXC| NFL NETWORK", "epg_channel_id": "", "stream_id": "1870426"},
+            {"name": "US| NFL NETWORK HD", "epg_channel_id": "NFLNetwork.us", "stream_id": "45526"},
+        ]
+
+        cbs_matches = rank_catalog_channels("KOVR", channels, limit=2, fast_autocomplete=True)
+        nfl_matches = rank_catalog_channels("NFL Net", channels, limit=2, fast_autocomplete=True)
+
+        self.assertEqual(cbs_matches[0][1]["stream_id"], "173140")
+        self.assertEqual(nfl_matches[0][1]["stream_id"], "1870426")
+
     def test_channel_search_matches_show_with_quality_and_playlist_prefixes(self):
         channels = [
             {"name": "US| 24/7 KING OF THE HILL", "stream_id": "559534"},
